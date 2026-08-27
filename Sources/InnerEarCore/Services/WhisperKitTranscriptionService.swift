@@ -1,5 +1,9 @@
 import Foundation
-import WhisperKit
+// WhisperKit's own types (e.g. the WhisperKit pipeline class itself)
+// aren't yet Sendable-audited, which trips Swift 6 strict concurrency when
+// they cross this actor's isolation boundary — same situation as
+// ScreenCaptureKit in Phase 2, same fix.
+@preconcurrency import WhisperKit
 
 /// On-device transcription backed by WhisperKit (Core ML). Fully local — no
 /// network access is performed beyond WhisperKit's one-time model download
