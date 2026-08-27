@@ -3,6 +3,14 @@ import Foundation
 import InnerEarCore
 
 /// Top-level command for the `innerear` CLI.
+///
+/// ArgumentParser requires an explicit availability annotation on any
+/// AsyncParsableCommand root (needed once RecordCommand's real
+/// AVFoundation/ScreenCaptureKit-backed run() became async in Phase 2) —
+/// without it, `.main()` fails at runtime with "Asynchronous root command
+/// needs availability annotation" even though Package.swift already
+/// declares .macOS(.v14) as the deployment target.
+@available(macOS 10.15, macCatalyst 13, iOS 13, tvOS 13, watchOS 6, *)
 struct InnerEarCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "innerear",

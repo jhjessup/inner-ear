@@ -221,6 +221,11 @@ run_phase_smoke_tests() {
 STEPS_RUN=()
 STEPS_STATUS=()
 
+# Initialize the shared log buffer BEFORE anything appends to it — this
+# used to happen after run_phase_smoke_tests, silently truncating away
+# whatever the smoke tests had just logged.
+echo "" > "$RESULTS_FILE.tmp"
+
 # Run phase-specific smoke tests before standard steps
 run_phase_smoke_tests
 
@@ -240,8 +245,6 @@ run_step() {
   cat "$logfile" >> "$RESULTS_FILE.tmp"
   echo "" >> "$RESULTS_FILE.tmp"
 }
-
-echo "" > "$RESULTS_FILE.tmp"
 
 echo "Toolchain versions..."
 {
