@@ -26,37 +26,40 @@ REPAIR_LOG="$LOG_DIR/toolchain-repair.log"
 
 # ---------------------------------------------------------------------------
 # Toolchain repair: full Xcode is NOT required for `swift build`/`test`/`run`
-# on a plain SPM package — Command Line Tools alone is a normal, supported
-# setup. If it's failing anyway (a known symptom: manifest compilation fails
-# to link PackageDescription, before any project code is reached — usually
-# CLT falling out of sync with a very new macOS/Swift version), try fixing
-# it automatically before wasting a full build+test+CLI cycle on a toolchain
-# that can't compile anything.
+# on a plain SPM package in principle — Command Line Tools alone is a
+# normal, supported setup for `swift build`/`run`. `swift test` is a
+# separate story: it needs either XCTest.framework or the `Testing` module,
+# and on at least one observed CLT/macOS combo, CLT ships neither — both
+# are otherwise only guaranteed bundled with full Xcode. Probing with
+# `swift test` (a superset of `swift build`) catches that in addition to
+# the known manifest/PackageDescription-link failure, and both are worth
+# trying the same automatic fixes on before giving up.
 # ---------------------------------------------------------------------------
-probe_swift_build() {
-  swift build > "$1" 2>&1
+probe_swift_test() {
+  swift test > "$1" 2>&1
 }
 
-is_manifest_link_failure() {
-  grep -q "Package.__allocating_init" "$1" 2>/dev/null || grep -q "Invalid manifest" "$1" 2>/dev/null
+is_known_toolchain_failure() {
+  grep -qE "Package\.__allocating_init|Invalid manifest|no such module 'Testing'|no such module 'XCTest'" "$1" 2>/dev/null
 }
 
 ensure_working_toolchain() {
   local probe_log="$LOG_DIR/toolchain-probe.log"
 
-  if probe_swift_build "$probe_log"; then
-    echo "Toolchain OK — swift build succeeds." | tee -a "$REPAIR_LOG"
+  if probe_swift_test "$probe_log"; then
+    echo "Toolchain OK — swift test succeeds." | tee -a "$REPAIR_LOG"
     return 0
   fi
 
-  if ! is_manifest_link_failure "$probe_log"; then
+  if ! is_known_toolchain_failure "$probe_log"; then
     {
-      echo "Initial swift build failed, but not with the known CLT/manifest-link"
-      echo "signature — this needs manual investigation, not the automatic fixes"
-      echo "below. Probe log:"
-      cat "$probe_log"
+      echo "Initial swift test failed, but not with a known CLT toolchain-gap"
+      echo "signature (manifest-link failure, or missing Testing/XCTest module)."
+      echo "Likely a real build/test failure rather than a toolchain problem —"
+      echo "proceeding to the normal step-by-step run so it's captured with full"
+      echo "detail in the results file rather than treated as a toolchain abort."
     } | tee -a "$REPAIR_LOG"
-    return 1
+    return 0
   fi
 
   {
@@ -79,7 +82,7 @@ ensure_working_toolchain() {
     echo "swiftly installation itself failed — skipping to next fix attempt." | tee -a "$REPAIR_LOG"
   fi
 
-  if probe_swift_build "$probe_log"; then
+  if probe_swift_test "$probe_log"; then
     echo "FIXED via swiftly toolchain: $(swift --version 2>&1 | head -1)" | tee -a "$REPAIR_LOG"
     return 0
   fi
@@ -101,7 +104,7 @@ ensure_working_toolchain() {
       [[ -d /Library/Developer/CommandLineTools/usr ]] && break
       sleep 10
     done
-    if probe_swift_build "$probe_log"; then
+    if probe_swift_test "$probe_log"; then
       echo "FIXED via Command Line Tools reinstall." | tee -a "$REPAIR_LOG"
       return 0
     fi
