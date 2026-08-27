@@ -1,18 +1,21 @@
 # Building InnerEar (CLI now, GUI App later on your Mac)
 
 This repo's `Package.swift` builds two things entirely via Swift Package
-Manager, no Xcode *project* required for either — but you do need full
-Xcode.app installed and selected as the active developer directory. With
-only the standalone Command Line Tools active, SwiftPM's manifest compiler
-fails to link `PackageDescription` and every `swift build`/`test`/`run`
-call fails identically at manifest-parsing, before reaching any project
-code. Check and fix with:
+Manager — Command Line Tools alone (no full Xcode.app) is normally enough
+for `swift build`/`test`/`run` on a plain SPM package like this one.
 
-```bash
-xcode-select -p
-# If this prints .../CommandLineTools instead of an Xcode.app path:
-sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-```
+If you hit a manifest-compilation failure — `swift build` fails to link
+`PackageDescription`, before any project code is even reached, the same
+error on every command — that's usually Command Line Tools falling out of
+sync with a very new macOS/Swift release, not a hard requirement for full
+Xcode. `scripts/verify-on-mac.sh` detects this automatically and tries two
+fixes in order: switching to an independent Swift.org toolchain via
+`swiftly` (no sudo needed), then reinstalling Command Line Tools. See that
+script for the manual commands if you're not running it via the script.
+
+Xcode.app is only needed for the optional GUI App target in §4 below
+(signing, Info.plist, Xcode Cloud) — not for building/testing/running the
+CLI.
 
 The two targets:
 

@@ -3,9 +3,9 @@
 # verify-on-mac.sh — One-shot macOS verification for InnerEar
 # =============================================================================
 # Run this on a real Mac after pulling a branch. It batches every
-# Mac-only step (build, test, CLI smoke checks) into a single script,
-# writes a results file, and commits + pushes it back to the current
-# branch so the results can be reviewed from anywhere else.
+# Mac-only step (toolchain repair, build, test, CLI smoke checks) into a
+# single script, writes a results file, and commits + pushes it back to the
+# current branch so the results can be reviewed from anywhere else.
 #
 # Usage:
 #   git checkout <branch>
@@ -16,27 +16,134 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
-
-DEV_DIR="$(xcode-select -p 2>/dev/null || true)"
-if [[ "$DEV_DIR" == *CommandLineTools* ]] || [[ -z "$DEV_DIR" ]]; then
-  cat <<EOF
-ERROR: Active developer directory is "$DEV_DIR" — Command Line Tools only,
-not full Xcode. SwiftPM's manifest compiler cannot link PackageDescription
-in this mode, so every swift build/test/run call fails identically at
-manifest-parsing, before any project code is even reached.
-
-Fix (requires Xcode.app installed from the App Store):
-  sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-  xcodebuild -version   # sanity check — should print a real Xcode version
-
-Then re-run this script.
-EOF
-  exit 1
-fi
 RESULTS_FILE="MAC_VERIFY_RESULTS.md"
 LOG_DIR="$(mktemp -d)"
 BRANCH="$(git branch --show-current)"
 TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+REPAIR_LOG="$LOG_DIR/toolchain-repair.log"
+: > "$REPAIR_LOG"
+
+# ---------------------------------------------------------------------------
+# Toolchain repair: full Xcode is NOT required for `swift build`/`test`/`run`
+# on a plain SPM package — Command Line Tools alone is a normal, supported
+# setup. If it's failing anyway (a known symptom: manifest compilation fails
+# to link PackageDescription, before any project code is reached — usually
+# CLT falling out of sync with a very new macOS/Swift version), try fixing
+# it automatically before wasting a full build+test+CLI cycle on a toolchain
+# that can't compile anything.
+# ---------------------------------------------------------------------------
+probe_swift_build() {
+  swift build > "$1" 2>&1
+}
+
+is_manifest_link_failure() {
+  grep -q "Package.__allocating_init" "$1" 2>/dev/null || grep -q "Invalid manifest" "$1" 2>/dev/null
+}
+
+ensure_working_toolchain() {
+  local probe_log="$LOG_DIR/toolchain-probe.log"
+
+  if probe_swift_build "$probe_log"; then
+    echo "Toolchain OK — swift build succeeds." | tee -a "$REPAIR_LOG"
+    return 0
+  fi
+
+  if ! is_manifest_link_failure "$probe_log"; then
+    {
+      echo "Initial swift build failed, but not with the known CLT/manifest-link"
+      echo "signature — this needs manual investigation, not the automatic fixes"
+      echo "below. Probe log:"
+      cat "$probe_log"
+    } | tee -a "$REPAIR_LOG"
+    return 1
+  fi
+
+  {
+    echo "Detected known CLT/manifest-link toolchain issue. Attempting automatic fixes."
+    echo ""
+    echo "--- Attempt 1: install/switch to an official Swift.org toolchain via swiftly (no sudo) ---"
+  } | tee -a "$REPAIR_LOG"
+
+  if ! command -v swiftly >/dev/null 2>&1; then
+    curl -sL https://raw.githubusercontent.com/swiftlang/swiftly/main/swiftly-install.sh \
+      | bash -s -- -y >> "$REPAIR_LOG" 2>&1 || true
+  fi
+  [[ -f "$HOME/.swiftly/env.sh" ]] && source "$HOME/.swiftly/env.sh"
+  export PATH="$HOME/.swiftly/bin:$PATH"
+
+  if command -v swiftly >/dev/null 2>&1; then
+    swiftly install latest --assume-yes >> "$REPAIR_LOG" 2>&1 || true
+    swiftly use latest >> "$REPAIR_LOG" 2>&1 || true
+  else
+    echo "swiftly installation itself failed — skipping to next fix attempt." | tee -a "$REPAIR_LOG"
+  fi
+
+  if probe_swift_build "$probe_log"; then
+    echo "FIXED via swiftly toolchain: $(swift --version 2>&1 | head -1)" | tee -a "$REPAIR_LOG"
+    return 0
+  fi
+
+  {
+    echo ""
+    echo "--- Attempt 2: reinstall Command Line Tools (needs sudo; best effort) ---"
+  } | tee -a "$REPAIR_LOG"
+
+  if sudo -n true 2>/dev/null; then
+    sudo rm -rf /Library/Developer/CommandLineTools
+    xcode-select --install >> "$REPAIR_LOG" 2>&1 || true
+    {
+      echo "Triggered a fresh Command Line Tools install. If a GUI 'Install' prompt"
+      echo "appeared, this will only complete once it's clicked through. Waiting up"
+      echo "to 10 minutes for the tools to reappear as installed..."
+    } | tee -a "$REPAIR_LOG"
+    for _ in $(seq 1 60); do
+      [[ -d /Library/Developer/CommandLineTools/usr ]] && break
+      sleep 10
+    done
+    if probe_swift_build "$probe_log"; then
+      echo "FIXED via Command Line Tools reinstall." | tee -a "$REPAIR_LOG"
+      return 0
+    fi
+  else
+    {
+      echo "Passwordless sudo not available — cannot automate the CLT reinstall"
+      echo "(needs your password and a GUI 'Install' click). Run manually:"
+      echo "  sudo rm -rf /Library/Developer/CommandLineTools && xcode-select --install"
+    } | tee -a "$REPAIR_LOG"
+  fi
+
+  {
+    echo ""
+    echo "Automatic fixes did not resolve the toolchain issue. Last probe log:"
+    cat "$probe_log"
+  } | tee -a "$REPAIR_LOG"
+  return 1
+}
+
+if ! ensure_working_toolchain; then
+  echo ""
+  echo "Aborting before build/test — toolchain is not in a working state."
+  echo "See $REPAIR_LOG contents (also written into $RESULTS_FILE below)."
+  {
+    echo "# Mac Verification Results — TOOLCHAIN REPAIR FAILED"
+    echo ""
+    echo "- **Branch:** \`$BRANCH\`"
+    echo "- **Commit:** \`$(git rev-parse HEAD)\`"
+    echo "- **Timestamp (UTC):** $TIMESTAMP"
+    echo ""
+    echo "swift build/test were not attempted — the toolchain itself is broken."
+    echo "See repair log below."
+    echo ""
+    echo '```'
+    cat "$REPAIR_LOG"
+    echo '```'
+  } > "$RESULTS_FILE"
+  git add "$RESULTS_FILE"
+  git commit -m "chore: mac verification — toolchain repair failed ($TIMESTAMP)"
+  git push origin "$BRANCH"
+  exit 1
+fi
 
 STEPS_RUN=()
 STEPS_STATUS=()
@@ -86,6 +193,11 @@ run_step "innerear export (expect not-yet-implemented)" swift run innerear expor
   echo "## Toolchain"
   echo '```'
   cat "$LOG_DIR/versions.log"
+  echo '```'
+  echo ""
+  echo "## Toolchain Repair Log"
+  echo '```'
+  cat "$REPAIR_LOG"
   echo '```'
   echo ""
   echo "## Step Results"
