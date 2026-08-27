@@ -61,19 +61,25 @@ Write concrete types conforming to the five protocols in
 `Sources/InnerEarCore/Services/`:
 
 - `AudioCaptureService` → back with `AVAudioEngine` (microphone) +
-  `ScreenCaptureKit` (system audio).
-- `TranscriptionService` → back with WhisperKit's pipeline.
+  `ScreenCaptureKit` (system audio). (Phase 2 — not yet implemented.)
+- `TranscriptionService` → back with WhisperKit's pipeline. (Phase 3 — not
+  yet implemented.)
 - `DiarizationService` → on-device diarization (WhisperKit has experimental
-  diarization support; evaluate against Core ML alternatives).
-- `SummarizationService` → local Core ML LLM to start; cloud backend is a
-  separate future mission per ORACLE.md CONSTRAINT_2.
-- `ExportService` → `PDFKit` for PDF, plain string writers for
-  Markdown/text/RTF, `JSONEncoder` for JSON.
+  diarization support; evaluate against Core ML alternatives). (Phase 4 —
+  not yet implemented.)
+- `SummarizationService` → extractive (top-N sentence scoring) to start;
+  local Core ML LLM is a later stretch phase. (Phase 5 — not yet
+  implemented.)
+- `ExportService` → **implemented** (`FileExportService.swift`): Core
+  Graphics/Core Text for PDF, plain string writers for Markdown/text/RTF,
+  `JSONEncoder` for JSON, a hand-rolled writer for SRT subtitles.
 
 Keep each implementation in its own file next to the protocol, e.g.
 `WhisperKitTranscriptionService.swift`, so the protocol file stays a pure
-contract. Wire them into `InnerEarCLI/CLI.swift`'s command handlers once they
-exist, replacing the "not yet implemented" stubs.
+contract. Wire them into `InnerEarCLI/main.swift`'s ArgumentParser command
+handlers once they exist, replacing the remaining "not yet implemented"
+stubs (see `ExportCommand` in that file for the pattern — `export` is
+already wired to `FileExportService`/`RecordingStore`).
 
 Run the CLI against real audio with `swift run innerear record`; the first
 run triggers the standard macOS microphone (and, if `--no-system-audio` is
