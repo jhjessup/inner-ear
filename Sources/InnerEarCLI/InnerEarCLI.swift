@@ -3,6 +3,20 @@ import Foundation
 import InnerEarCore
 
 /// Top-level command for the `innerear` CLI.
+///
+/// Uses `@main` directly on the command struct (this file is deliberately
+/// NOT named main.swift — SwiftPM treats that filename as implicit
+/// top-level code, which is incompatible with @main). A prior attempt kept
+/// main.swift and called `InnerEarCLI.main()` from top-level code, adding
+/// `@available(...)` on the struct per ArgumentParser's own runtime error
+/// message ("Asynchronous root command needs availability annotation") —
+/// that didn't actually fix it; manually bridging into an async command
+/// from synchronous top-level code hits this check regardless of
+/// annotations. `@main` gives Swift's real compiler-synthesized async
+/// entry point instead of ArgumentParser's manual bridge, which is the
+/// pattern ArgumentParser's own documentation recommends for async root
+/// commands.
+@main
 struct InnerEarCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "innerear",
@@ -30,10 +44,70 @@ struct RecordCommand: AsyncParsableCommand {
     @Flag(name: .long, help: "Disable system audio capture (microphone only)")
     var noSystemAudio: Bool = false
 
+    @Option(name: .long, help: "Recording duration in seconds")
+    var duration: Double = 10
+
     func run() async throws {
-        print("record (system audio: \(!noSystemAudio)) — not yet implemented.")
-        print("Real AudioCaptureService implementation is pending — see docs/XCODE_SETUP.md.")
-        throw ExitCode(1)
+        let service: AVFoundationAudioCaptureService
+        do {
+            service = try AVFoundationAudioCaptureService()
+            try await service.startCapture(captureSystemAudio: !noSystemAudio)
+        } catch let error as AudioCaptureError {
+            switch error {
+            case .microphonePermissionDenied:
+                print("Error: Microphone permission denied — grant it in System Settings > Privacy & Security > Microphone")
+            case .systemAudioPermissionDenied:
+                print("Error: Screen Recording permission denied — grant it in System Settings > Privacy & Security > Screen Recording (needed for system audio capture)")
+            case .captureAlreadyInProgress:
+                print("Error: A recording is already in progress")
+            case .noActiveCapture:
+                print("Error: No active recording to stop")
+            case .deviceUnavailable:
+                print("Error: Audio device unavailable — check that a microphone is connected and not in use by another app")
+            }
+            throw ExitCode(1)
+        } catch {
+            print("Error starting recording: \(error)")
+            throw ExitCode(1)
+        }
+
+        print("Recording for \(duration) seconds...")
+
+        do {
+            try await Task.sleep(for: .seconds(duration))
+            let recording = try await service.stopCapture()
+
+            do {
+                let store = try RecordingStore()
+                try store.save(recording)
+                print("Recording saved: \(recording.id.uuidString)")
+            } catch {
+                print("Error saving recording: \(error)")
+                throw ExitCode(1)
+            }
+        } catch let error as AudioCaptureError {
+            switch error {
+            case .microphonePermissionDenied:
+                print("Error: Microphone permission denied — grant it in System Settings > Privacy & Security > Microphone")
+            case .systemAudioPermissionDenied:
+                print("Error: Screen Recording permission denied — grant it in System Settings > Privacy & Security > Screen Recording (needed for system audio capture)")
+            case .captureAlreadyInProgress:
+                print("Error: A recording is already in progress")
+            case .noActiveCapture:
+                print("Error: No active recording to stop")
+            case .deviceUnavailable:
+                print("Error: Audio device unavailable — check that a microphone is connected and not in use by another app")
+            }
+            throw ExitCode(1)
+        } catch let code as ExitCode {
+            // Already handled and printed by the RecordingStore save() catch
+            // above — rethrow as-is instead of falling into the generic
+            // catch below, which would print a confusing second message.
+            throw code
+        } catch {
+            print("Error during recording: \(error)")
+            throw ExitCode(1)
+        }
     }
 }
 
@@ -139,6 +213,3 @@ struct ExportCommand: AsyncParsableCommand {
         print("Exported to: \(outputURL.path)")
     }
 }
-
-// Entry point
-InnerEarCLI.main()

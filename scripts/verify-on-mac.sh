@@ -191,8 +191,13 @@ SMOKE_LABELS=()
 run_phase_smoke_tests() {
   local smoke_dir="$REPO_ROOT/scripts/mac-smoke"
   if [[ -d "$smoke_dir" ]]; then
-    # Find all phase-*.sh files, sorted
-    mapfile -t smoke_scripts < <(find "$smoke_dir" -maxdepth 1 -name 'phase-*.sh' -type f | sort)
+    # Find all phase-*.sh files, sorted. `mapfile`/`readarray` is a Bash 4+
+    # builtin, absent from macOS's shipped /bin/bash (still 3.2 for
+    # licensing reasons) — a portable while-read loop works on both.
+    local smoke_scripts=()
+    while IFS= read -r script; do
+      smoke_scripts+=("$script")
+    done < <(find "$smoke_dir" -maxdepth 1 -name 'phase-*.sh' -type f | sort)
     for script in "${smoke_scripts[@]}"; do
       local label="$(basename "$script" .sh)"
       SMOKE_LABELS+=("$label")
@@ -216,6 +221,11 @@ run_phase_smoke_tests() {
 STEPS_RUN=()
 STEPS_STATUS=()
 
+# Initialize the shared log buffer BEFORE anything appends to it — this
+# used to happen after run_phase_smoke_tests, silently truncating away
+# whatever the smoke tests had just logged.
+echo "" > "$RESULTS_FILE.tmp"
+
 # Run phase-specific smoke tests before standard steps
 run_phase_smoke_tests
 
@@ -235,8 +245,6 @@ run_step() {
   cat "$logfile" >> "$RESULTS_FILE.tmp"
   echo "" >> "$RESULTS_FILE.tmp"
 }
-
-echo "" > "$RESULTS_FILE.tmp"
 
 echo "Toolchain versions..."
 {
