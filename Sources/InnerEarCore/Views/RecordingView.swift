@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Root recording screen: start/stop control, live capture state, and the
 /// resulting transcript once processing completes.
+@MainActor
 public struct RecordingView: View {
     @Bindable private var viewModel: RecordingViewModel
     @State private var captureSystemAudio = true
