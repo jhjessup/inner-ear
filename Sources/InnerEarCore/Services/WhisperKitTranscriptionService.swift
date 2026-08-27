@@ -10,12 +10,17 @@ import WhisperKit
 /// clear `TranscriptionError.transcriptionFailed` rather than attempting a
 /// nonexistent model load. If/when WhisperKit (or a separate Parakeet
 /// pipeline) gains a Parakeet variant, this is the place to wire it in.
-public final class WhisperKitTranscriptionService: TranscriptionService, @unchecked Sendable {
+// An actor, not a class + NSLock: the pipeline cache needs to be safely
+// read/written from async contexts (loading a WhisperKit pipeline is
+// itself async), and NSLock.lock()/.unlock() are `noasync` under Swift 6
+// strict concurrency — actor isolation is the correct tool here, same
+// pattern as AVFoundationAudioCaptureService in Phase 2.
+public actor WhisperKitTranscriptionService: TranscriptionService {
 
     /// The WhisperKit model variant identifier corresponding to each
     /// `TranscriptionModel` case. Centralized here so the mapping is easy to
     /// audit and update when WhisperKit renames a variant.
-    private enum WhisperKitModelID {
+    private enum WhisperKitModelID: Hashable {
         case whisperLargeV3Turbo
 
         var variant: String {
@@ -31,9 +36,9 @@ public final class WhisperKitTranscriptionService: TranscriptionService, @unchec
 
     /// Loaded pipeline, keyed by the `WhisperKitModelID` it was initialized
     /// for. Holding it across calls avoids re-downloading and re-compiling
-    /// the Core ML model on every `transcribe()` invocation.
+    /// the Core ML model on every `transcribe()` invocation. No explicit
+    /// locking needed — actor isolation already serializes access.
     private var pipelineByModel: [WhisperKitModelID: WhisperKit] = [:]
-    private let pipelineLock = NSLock()
 
     public init() {}
 
@@ -122,12 +127,9 @@ public final class WhisperKitTranscriptionService: TranscriptionService, @unchec
     /// Return a cached `WhisperKit` pipeline for the given model, initializing
     /// it on first use. Subsequent calls reuse the loaded pipeline.
     private func loadPipeline(for modelID: WhisperKitModelID) async throws -> WhisperKit {
-        pipelineLock.lock()
         if let existing = pipelineByModel[modelID] {
-            pipelineLock.unlock()
             return existing
         }
-        pipelineLock.unlock()
 
         // WhisperKit's initializer is `async throws` (downloads + Core ML
         // compilation on first run) and takes the model identifier via the
@@ -142,12 +144,7 @@ public final class WhisperKitTranscriptionService: TranscriptionService, @unchec
             )
         }
 
-        pipelineLock.lock()
-        // Last-writer-wins is acceptable here: any concurrent initializer
-        // will have produced an equivalent pipeline for the same variant.
         pipelineByModel[modelID] = pipeline
-        pipelineLock.unlock()
-
         return pipeline
     }
 
