@@ -16,6 +16,23 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
+
+DEV_DIR="$(xcode-select -p 2>/dev/null || true)"
+if [[ "$DEV_DIR" == *CommandLineTools* ]] || [[ -z "$DEV_DIR" ]]; then
+  cat <<EOF
+ERROR: Active developer directory is "$DEV_DIR" — Command Line Tools only,
+not full Xcode. SwiftPM's manifest compiler cannot link PackageDescription
+in this mode, so every swift build/test/run call fails identically at
+manifest-parsing, before any project code is even reached.
+
+Fix (requires Xcode.app installed from the App Store):
+  sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+  xcodebuild -version   # sanity check — should print a real Xcode version
+
+Then re-run this script.
+EOF
+  exit 1
+fi
 RESULTS_FILE="MAC_VERIFY_RESULTS.md"
 LOG_DIR="$(mktemp -d)"
 BRANCH="$(git branch --show-current)"

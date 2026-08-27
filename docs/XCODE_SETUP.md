@@ -1,7 +1,20 @@
 # Building InnerEar (CLI now, GUI App later on your Mac)
 
 This repo's `Package.swift` builds two things entirely via Swift Package
-Manager — no Xcode required for either:
+Manager, no Xcode *project* required for either — but you do need full
+Xcode.app installed and selected as the active developer directory. With
+only the standalone Command Line Tools active, SwiftPM's manifest compiler
+fails to link `PackageDescription` and every `swift build`/`test`/`run`
+call fails identically at manifest-parsing, before reaching any project
+code. Check and fix with:
+
+```bash
+xcode-select -p
+# If this prints .../CommandLineTools instead of an Xcode.app path:
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+```
+
+The two targets:
 
 - **`InnerEarCLI`** (product name `innerear`) — the CLI front end. First
   target in the package, and the fastest path to exercising the real engine
