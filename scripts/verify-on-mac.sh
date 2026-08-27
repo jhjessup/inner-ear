@@ -102,6 +102,17 @@ ensure_working_toolchain() {
     return 0
   fi
 
+  if ! is_known_toolchain_failure "$probe_log"; then
+    {
+      echo "swiftly resolved the original toolchain-gap signature — the remaining"
+      echo "failure is different and no longer matches a known toolchain issue."
+      echo "Treating the toolchain as fixed and proceeding to the normal run so"
+      echo "this (likely a real code issue, not a toolchain problem) is captured"
+      echo "with full detail there instead of being misreported as a repair failure."
+    } | tee -a "$REPAIR_LOG"
+    return 0
+  fi
+
   {
     echo ""
     echo "--- Attempt 2: reinstall Command Line Tools (needs sudo; best effort) ---"
@@ -121,6 +132,14 @@ ensure_working_toolchain() {
     done
     if probe_swift_test "$probe_log"; then
       echo "FIXED via Command Line Tools reinstall." | tee -a "$REPAIR_LOG"
+      return 0
+    fi
+    if ! is_known_toolchain_failure "$probe_log"; then
+      {
+        echo "CLT reinstall resolved the original toolchain-gap signature — the"
+        echo "remaining failure no longer matches a known toolchain issue. Treating"
+        echo "the toolchain as fixed and proceeding to the normal run."
+      } | tee -a "$REPAIR_LOG"
       return 0
     fi
   else
