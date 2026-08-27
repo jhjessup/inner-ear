@@ -1,6 +1,11 @@
 import Foundation
 import AVFoundation
-import ScreenCaptureKit
+// ScreenCaptureKit's types (e.g. SCShareableContent) aren't yet audited as
+// Sendable in this SDK version, which trips Swift 6 strict-concurrency
+// checking when they cross this actor's isolation boundary.
+// @preconcurrency is Apple's documented approach for system frameworks
+// not yet updated for strict concurrency checking.
+@preconcurrency import ScreenCaptureKit
 import CoreAudio
 
 /// Real AudioCaptureService implementation using AVAudioEngine (mic) and ScreenCaptureKit (system audio).
@@ -243,7 +248,11 @@ public final actor AVFoundationAudioCaptureService: AudioCaptureService, Sendabl
         )
     }
 
-    private func writeSystemAudioBuffer(_ sampleBuffer: CMSampleBuffer) async {
+    // fileprivate, not private — SystemAudioCaptureHandler (a separate type
+    // in this same file) needs to call this from its SCStreamOutput
+    // callback. Swift's `private` restricts access to the enclosing
+    // declaration itself, not just the file.
+    fileprivate func writeSystemAudioBuffer(_ sampleBuffer: CMSampleBuffer) async {
         guard let url = systemAudioFileURL else { return }
 
         // Lazily open the file using the real format of the first buffer we
