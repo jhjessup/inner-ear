@@ -182,8 +182,42 @@ if ! ensure_working_toolchain; then
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# Phase-specific smoke tests: run any scripts/mac-smoke/phase-*.sh files
+# as additional run_step calls before the standard STEPS_RUN loop.
+# ---------------------------------------------------------------------------
+SMOKE_LABELS=()
+
+run_phase_smoke_tests() {
+  local smoke_dir="$REPO_ROOT/scripts/mac-smoke"
+  if [[ -d "$smoke_dir" ]]; then
+    # Find all phase-*.sh files, sorted
+    mapfile -t smoke_scripts < <(find "$smoke_dir" -maxdepth 1 -name 'phase-*.sh' -type f | sort)
+    for script in "${smoke_scripts[@]}"; do
+      local label="$(basename "$script" .sh)"
+      SMOKE_LABELS+=("$label")
+      echo "== Phase smoke: $label =="
+      local logfile="$LOG_DIR/$(echo "$label" | tr ' /' '__').log"
+      if bash "$script" > "$logfile" 2>&1; then
+        echo "PASS: $label"
+        STEPS_RUN+=("phase-smoke: $label"); STEPS_STATUS+=("PASS")
+      else
+        local code=$?
+        echo "NON-ZERO EXIT ($code): $label (see log below)"
+        STEPS_RUN+=("phase-smoke: $label"); STEPS_STATUS+=("EXIT_$code")
+      fi
+      echo "--- log: $label ---" >> "$RESULTS_FILE.tmp"
+      cat "$logfile" >> "$RESULTS_FILE.tmp"
+      echo "" >> "$RESULTS_FILE.tmp"
+    done
+  fi
+}
+
 STEPS_RUN=()
 STEPS_STATUS=()
+
+# Run phase-specific smoke tests before standard steps
+run_phase_smoke_tests
 
 run_step() {
   local label="$1"; shift
@@ -220,6 +254,23 @@ run_step "innerear record (expect not-yet-implemented)" swift run innerear recor
 run_step "innerear transcribe (expect not-yet-implemented)" swift run innerear transcribe /tmp/nonexistent.wav
 run_step "innerear export (expect not-yet-implemented)" swift run innerear export fake-id --format markdown
 
+# ---------------------------------------------------------------------------
+# Write results to dated file under docs/mac-verification/
+# ---------------------------------------------------------------------------
+RESULTS_DIR="$REPO_ROOT/docs/mac-verification"
+mkdir -p "$RESULTS_DIR"
+# Name the results file after whichever phase smoke script(s) actually ran
+# this time — never hardcode a specific phase, since this script is shared
+# across every phase going forward.
+if [[ ${#SMOKE_LABELS[@]} -eq 0 ]]; then
+  RUN_LABEL="verify"
+elif [[ ${#SMOKE_LABELS[@]} -eq 1 ]]; then
+  RUN_LABEL="${SMOKE_LABELS[0]}"
+else
+  RUN_LABEL="multi-phase"
+fi
+DATED_RESULTS_FILE="$RESULTS_DIR/${RUN_LABEL}-$(date -u +%Y%m%dT%H%M%SZ).md"
+
 {
   echo "# Mac Verification Results"
   echo ""
@@ -251,15 +302,15 @@ run_step "innerear export (expect not-yet-implemented)" swift run innerear expor
   echo "Full logs below."
   echo ""
   cat "$RESULTS_FILE.tmp"
-} > "$RESULTS_FILE"
+} > "$DATED_RESULTS_FILE"
 
 rm -f "$RESULTS_FILE.tmp"
 rm -rf "$LOG_DIR"
 
 echo ""
-echo "Wrote $RESULTS_FILE. Committing and pushing..."
+echo "Wrote $DATED_RESULTS_FILE. Committing and pushing..."
 
-git add "$RESULTS_FILE"
+git add "$DATED_RESULTS_FILE"
 git commit -m "chore: mac verification results ($TIMESTAMP)"
 git push origin "$BRANCH"
 
