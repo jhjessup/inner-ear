@@ -177,8 +177,13 @@ public final actor AVFoundationAudioCaptureService: AudioCaptureService, Sendabl
 
         // Install tap on input node
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+            // AVAudioPCMBuffer isn't Sendable-audited in this SDK, so Swift 6
+            // strict concurrency flags handing it into a new Task directly.
+            // It's an immutable snapshot by the time the tap delivers it, so
+            // boxing it as @unchecked Sendable to cross the boundary is safe.
+            let box = UncheckedSendableBox(value: buffer)
             Task { [weak self] in
-                await self?.writeMicBuffer(buffer)
+                await self?.writeMicBuffer(box.value)
             }
         }
     }
@@ -312,10 +317,22 @@ private final class SystemAudioCaptureHandler: NSObject, SCStreamOutput, @unchec
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .audio else { return }
+        // See the matching comment in setupMicrophoneCapture — CMSampleBuffer
+        // isn't Sendable-audited either.
+        let box = UncheckedSendableBox(value: sampleBuffer)
         Task { [weak captureService] in
-            await captureService?.writeSystemAudioBuffer(sampleBuffer)
+            await captureService?.writeSystemAudioBuffer(box.value)
         }
     }
+}
+
+/// Shuttles a non-Sendable-audited value across a Task boundary. Only safe
+/// to use for values that are effectively immutable snapshots by the time
+/// they're boxed (true for both AVAudioPCMBuffer from a tap callback and
+/// CMSampleBuffer from an SCStreamOutput callback — neither is mutated
+/// again by the framework after delivery).
+private struct UncheckedSendableBox<Value>: @unchecked Sendable {
+    let value: Value
 }
 
 // MARK: - DateFormatter Extension
