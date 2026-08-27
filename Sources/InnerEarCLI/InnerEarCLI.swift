@@ -124,10 +124,73 @@ struct TranscribeCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Transcription model to use (whisperLargeV3Turbo, parakeet)")
     var model: String?
 
+    @Option(name: .long, help: "Language code (e.g. en) — omit for auto-detect")
+    var language: String?
+
     func run() async throws {
-        print("transcribe '\(audioFile)' (model: \(model ?? "default")) — not yet implemented.")
-        print("Real TranscriptionService implementation is pending — see docs/XCODE_SETUP.md.")
-        throw ExitCode(1)
+        // Validate --model against TranscriptionModel's known raw values up
+        // front so the operator gets a clear CLI error rather than a
+        // generic runtime failure from inside the transcription pipeline.
+        let modelRaw = model ?? TranscriptionModel.whisperLargeV3Turbo.rawValue
+        guard let selectedModel = TranscriptionModel(rawValue: modelRaw) else {
+            let validValues = TranscriptionModel.allCases.map(\.rawValue).joined(separator: ", ")
+            print("Error: Unknown model '\(modelRaw)'. Valid options: \(validValues).")
+            throw ExitCode(1)
+        }
+
+        // Build a minimal Recording from the audio file path. We don't have
+        // the real recording metadata (title, duration) here, so derive what
+        // we can and stub the rest.
+        // TODO: Compute duration by probing the actual audio file in a future
+        // pass; for now 0 is a harmless placeholder since the transcription
+        // pipeline doesn't depend on it.
+        let audioURL = URL(fileURLWithPath: audioFile)
+        let title = audioURL.deletingPathExtension().lastPathComponent
+        let recording = Recording(
+            title: title,
+            createdAt: Date(),
+            duration: 0,
+            microphoneFileURL: audioURL
+        )
+
+        let service = WhisperKitTranscriptionService()
+        let transcript: Transcript
+        do {
+            transcript = try await service.transcribe(
+                recording: recording,
+                model: selectedModel,
+                languageCode: language
+            )
+        } catch let error as TranscriptionError {
+            switch error {
+            case .audioFileUnreadable:
+                print("Error: Could not read audio file at \(audioFile) — check the path and permissions.")
+            case .modelNotDownloaded(let m):
+                print("Error: Model \(m.rawValue) is not downloaded.")
+            case .transcriptionFailed(let reason):
+                print("Error: Transcription failed — \(reason)")
+            }
+            throw ExitCode(1)
+        } catch let code as ExitCode {
+            // Already handled and printed by the inner catch — rethrow as-is
+            // instead of falling into the generic catch below, which would
+            // print a confusing second message.
+            throw code
+        } catch {
+            print("Error: \(error)")
+            throw ExitCode(1)
+        }
+
+        do {
+            let store = try RecordingStore()
+            try store.save(transcript)
+        } catch {
+            print("Error saving transcript: \(error)")
+            throw ExitCode(1)
+        }
+
+        print("Transcript saved: \(transcript.id.uuidString)")
+        print(transcript.fullText)
     }
 }
 

@@ -12,9 +12,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0"),
-        // WhisperKit is added by the operator in Xcode once the GUI App target
-        // exists — see docs/XCODE_SETUP.md. Not pinned here to avoid resolving
-        // a package dependency in an environment that cannot build/run it.
+        .package(url: "https://github.com/argmaxinc/WhisperKit.git", from: "0.9.0"),
     ],
     targets: [
         // First target: the CLI front end to the core engine.
@@ -24,7 +22,9 @@ let package = Package(
         ),
         .target(
             name: "InnerEarCore",
-            dependencies: []
+            dependencies: [
+                .product(name: "WhisperKit", package: "WhisperKit"),
+            ]
         ),
         .testTarget(
             name: "InnerEarCoreTests",
