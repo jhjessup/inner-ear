@@ -4,13 +4,19 @@ import InnerEarCore
 
 /// Top-level command for the `innerear` CLI.
 ///
-/// ArgumentParser requires an explicit availability annotation on any
-/// AsyncParsableCommand root (needed once RecordCommand's real
-/// AVFoundation/ScreenCaptureKit-backed run() became async in Phase 2) —
-/// without it, `.main()` fails at runtime with "Asynchronous root command
-/// needs availability annotation" even though Package.swift already
-/// declares .macOS(.v14) as the deployment target.
-@available(macOS 10.15, macCatalyst 13, iOS 13, tvOS 13, watchOS 6, *)
+/// Uses `@main` directly on the command struct (this file is deliberately
+/// NOT named main.swift — SwiftPM treats that filename as implicit
+/// top-level code, which is incompatible with @main). A prior attempt kept
+/// main.swift and called `InnerEarCLI.main()` from top-level code, adding
+/// `@available(...)` on the struct per ArgumentParser's own runtime error
+/// message ("Asynchronous root command needs availability annotation") —
+/// that didn't actually fix it; manually bridging into an async command
+/// from synchronous top-level code hits this check regardless of
+/// annotations. `@main` gives Swift's real compiler-synthesized async
+/// entry point instead of ArgumentParser's manual bridge, which is the
+/// pattern ArgumentParser's own documentation recommends for async root
+/// commands.
+@main
 struct InnerEarCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "innerear",
@@ -207,6 +213,3 @@ struct ExportCommand: AsyncParsableCommand {
         print("Exported to: \(outputURL.path)")
     }
 }
-
-// Entry point
-InnerEarCLI.main()

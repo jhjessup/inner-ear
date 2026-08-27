@@ -50,3 +50,13 @@ jobs:
       # just pay for the same compile twice.
       - name: Test
         run: swift test --package-path . -v
+
+      # Compiling successfully doesn't mean the CLI actually runs — a real
+      # bug (ArgumentParser's async-root-command runtime check) made every
+      # subcommand fail at runtime while `swift build`/`swift test` stayed
+      # green, and only showed up on a Mac handoff round-trip. Assert the
+      # binary actually executes, cheaply, right here instead.
+      - name: CLI smoke check
+        run: |
+          swift run innerear --version
+          swift run innerear --help
