@@ -1,9 +1,14 @@
-import XCTest
+import Testing
 @testable import InnerEarCore
 
 // @unit — pure orchestration logic against fakes; no real audio/Core ML/filesystem I/O.
+//
+// Swift Testing (not XCTest): XCTest.framework is bundled only with full Xcode, not
+// Command Line Tools, so `swift test` fails with "no such module 'XCTest'" on a
+// CLT-only machine. Swift Testing ships with the open-source Swift toolchain itself
+// and works without Xcode — see MAC_VERIFY_RESULTS.md for the failure that prompted this.
 @MainActor
-final class RecordingViewModelTests: XCTestCase {
+struct RecordingViewModelTests {
 
     private func makeViewModel(
         audioCapture: FakeAudioCaptureService = FakeAudioCaptureService(),
@@ -23,44 +28,48 @@ final class RecordingViewModelTests: XCTestCase {
         return (vm, audioCapture, transcription, diarization, summarization)
     }
 
-    func test_startRecording_whenSucceeds_updatesCaptureStateToRecording() async {
+    @Test
+    func startRecording_whenSucceeds_updatesCaptureStateToRecording() async {
         let (vm, capture, _, _, _) = makeViewModel()
 
         await vm.startRecording(captureSystemAudio: true)
 
-        XCTAssertEqual(capture.startCaptureCalls, [true])
+        #expect(capture.startCaptureCalls == [true])
         if case .recording = vm.captureState {
             // expected
         } else {
-            XCTFail("Expected .recording state, got \(vm.captureState)")
+            Issue.record("Expected .recording state, got \(vm.captureState)")
         }
-        XCTAssertNil(vm.errorMessage)
+        #expect(vm.errorMessage == nil)
     }
 
-    func test_startRecording_whenPermissionDenied_setsErrorMessageAndLeavesStateIdle() async {
+    @Test
+    func startRecording_whenPermissionDenied_setsErrorMessageAndLeavesStateIdle() async {
         let capture = FakeAudioCaptureService()
         capture.startCaptureError = AudioCaptureError.microphonePermissionDenied
         let (vm, _, _, _, _) = makeViewModel(audioCapture: capture)
 
         await vm.startRecording(captureSystemAudio: false)
 
-        XCTAssertNotNil(vm.errorMessage)
-        XCTAssertEqual(vm.captureState, .idle)
+        #expect(vm.errorMessage != nil)
+        #expect(vm.captureState == .idle)
     }
 
-    func test_stopRecordingAndProcess_runsFullPipeline_andPublishesFinalSummary() async {
+    @Test
+    func stopRecordingAndProcess_runsFullPipeline_andPublishesFinalSummary() async {
         let (vm, _, transcription, _, summarization) = makeViewModel()
 
         await vm.startRecording(captureSystemAudio: false)
         await vm.stopRecordingAndProcess(model: .parakeet)
 
-        XCTAssertEqual(transcription.transcribeCallCount, 1)
-        XCTAssertNotNil(vm.transcript)
-        XCTAssertEqual(vm.summary?.overview, summarization.stubbedSummary.overview)
-        XCTAssertNil(vm.errorMessage)
+        #expect(transcription.transcribeCallCount == 1)
+        #expect(vm.transcript != nil)
+        #expect(vm.summary?.overview == summarization.stubbedSummary.overview)
+        #expect(vm.errorMessage == nil)
     }
 
-    func test_stopRecordingAndProcess_whenTranscriptionFails_setsErrorAndDoesNotProduceSummary() async {
+    @Test
+    func stopRecordingAndProcess_whenTranscriptionFails_setsErrorAndDoesNotProduceSummary() async {
         let transcription = FakeTranscriptionService(stubbedTranscript: TestFixtures.transcript())
         transcription.transcribeError = TranscriptionError.transcriptionFailed(reason: "boom")
         let (vm, _, _, _, _) = makeViewModel(transcription: transcription)
@@ -68,7 +77,7 @@ final class RecordingViewModelTests: XCTestCase {
         await vm.startRecording(captureSystemAudio: false)
         await vm.stopRecordingAndProcess(model: .whisperLargeV3Turbo)
 
-        XCTAssertNotNil(vm.errorMessage)
-        XCTAssertNil(vm.summary)
+        #expect(vm.errorMessage != nil)
+        #expect(vm.summary == nil)
     }
 }
