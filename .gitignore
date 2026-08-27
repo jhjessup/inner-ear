@@ -1,0 +1,5 @@
+
+# The Shim Syndicate — governance is tracked centrally in the syndicate-projects
+# repo and symlinked in as .syndicate. Never commit it into this code repo.
+.syndicate
+
