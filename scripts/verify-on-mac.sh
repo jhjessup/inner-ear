@@ -69,8 +69,15 @@ ensure_working_toolchain() {
   } | tee -a "$REPAIR_LOG"
 
   if ! command -v swiftly >/dev/null 2>&1; then
-    curl -sL https://raw.githubusercontent.com/swiftlang/swiftly/main/swiftly-install.sh \
-      | bash -s -- -y >> "$REPAIR_LOG" 2>&1 || true
+    # Official swift.org-documented macOS install: a signed .pkg installed to
+    # the user's home directory (no sudo). A prior raw-script URL used here
+    # 404'd — this is the documented method from https://swift.org/install.
+    if curl -sL -o "$LOG_DIR/swiftly.pkg" https://download.swift.org/swiftly/darwin/swiftly.pkg >> "$REPAIR_LOG" 2>&1; then
+      installer -pkg "$LOG_DIR/swiftly.pkg" -target CurrentUserHomeDirectory >> "$REPAIR_LOG" 2>&1 || true
+      [[ -x "$HOME/.swiftly/bin/swiftly" ]] && "$HOME/.swiftly/bin/swiftly" init --quiet-shell-followup --assume-yes >> "$REPAIR_LOG" 2>&1 || true
+    else
+      echo "Could not download swiftly.pkg from download.swift.org." | tee -a "$REPAIR_LOG"
+    fi
   fi
   [[ -f "$HOME/.swiftly/env.sh" ]] && source "$HOME/.swiftly/env.sh"
   export PATH="$HOME/.swiftly/bin:$PATH"
@@ -79,7 +86,15 @@ ensure_working_toolchain() {
     swiftly install latest --assume-yes >> "$REPAIR_LOG" 2>&1 || true
     swiftly use latest >> "$REPAIR_LOG" 2>&1 || true
   else
-    echo "swiftly installation itself failed — skipping to next fix attempt." | tee -a "$REPAIR_LOG"
+    {
+      echo "swiftly installation itself failed — skipping to next fix attempt."
+      echo "Manual fallback, if this keeps failing (run yourself, then re-run this script):"
+      echo "  curl -O https://download.swift.org/swiftly/darwin/swiftly.pkg"
+      echo "  installer -pkg swiftly.pkg -target CurrentUserHomeDirectory"
+      echo "  ~/.swiftly/bin/swiftly init --quiet-shell-followup --assume-yes"
+      echo "  . ~/.swiftly/env.sh"
+      echo "  swiftly install latest && swiftly use latest"
+    } | tee -a "$REPAIR_LOG"
   fi
 
   if probe_swift_test "$probe_log"; then
