@@ -1,79 +1,52 @@
-# Wrapping ScribeCore in a macOS App (do this in Xcode, on your Mac)
+# Building InnerEar (CLI now, GUI App later on your Mac)
 
-This repo's `Package.swift` builds `ScribeCore` as a Swift Package — protocols,
-models, view models, and SwiftUI views, all unit-testable with `swift test`
-(no Xcode required for that part). To get an actual runnable, App
-Store-shippable app, you need a real App target with an Info.plist,
-entitlements, and app icon. SPM alone can't produce that.
+This repo's `Package.swift` builds two things entirely via Swift Package
+Manager — no Xcode required for either:
 
-## 1. Verify the package builds and tests pass
+- **`InnerEarCLI`** (product name `innerear`) — the CLI front end. First
+  target in the package, and the fastest path to exercising the real engine
+  once real service implementations exist, since a bare CLI binary needs no
+  App Sandbox entitlements or Info.plist to request mic access (macOS still
+  prompts once at runtime, tied to the terminal/binary, not to an App target).
+- **`InnerEarCore`** — the protocol-based engine (services, models, view
+  models, SwiftUI views) both the CLI and the future GUI app depend on.
+
+A GUI App target (for eventual Mac App Store distribution) is a separate,
+optional step — see §4 below — and is the only part of this project that
+actually requires Xcode.
+
+## 1. Build and test the package
 
 ```bash
-cd scribe
+cd inner-ear
 swift build
 swift test
+swift run innerear --version
+swift run innerear --help
 ```
 
-## 2. Create the App target in Xcode
+`record`/`transcribe`/`export` currently print "not yet implemented" — the
+CLI's command routing is scaffolded against `InnerEarCore`'s protocols, but
+no concrete `AVFoundation`/`ScreenCaptureKit`/`WhisperKit`-backed
+implementation exists yet (see ADR-001 in the mission audit log). That's the
+next mission, done on macOS where it can actually be compiled and verified.
 
-1. Xcode → File → New → Project → macOS → App.
-2. Product Name: `Scribe`. Interface: SwiftUI. Language: Swift.
-3. Save it as a sibling folder, e.g. `scribe/App/`, or anywhere convenient —
-   it does not need to be inside `Sources/`.
-4. In the new project, File → Add Package Dependencies → Add Local... → select
-   the `scribe/` directory (the one with `Package.swift`). Add `ScribeCore` as
-   a dependency of the App target.
-5. Replace the generated `ScribeApp.swift` with something like:
+## 2. Add WhisperKit
 
-   ```swift
-   import SwiftUI
-   import ScribeCore
+```bash
+# In Package.swift, add to `dependencies:`
+.package(url: "https://github.com/argmaxinc/WhisperKit", from: "<version>")
+# and add "WhisperKit" to the InnerEarCore target's dependencies.
+```
 
-   @main
-   struct ScribeApp: App {
-       var body: some Scene {
-           WindowGroup {
-               // Wire real service implementations here once they exist.
-               // Until then, RecordingView can be previewed with fakes from
-               // ScribeCoreTests/TestSupport (copy what you need into a
-               // throwaway preview provider — don't ship test code).
-               Text("Wire real services here")
-           }
-       }
-   }
-   ```
-
-## 3. Add WhisperKit
-
-File → Add Package Dependencies → `https://github.com/argmaxinc/WhisperKit` →
-add to the App target (or to `ScribeCore` directly in `Package.swift` once
-you're ready to write the real `TranscriptionService` implementation).
-
-## 4. Entitlements & Info.plist
-
-In the App target's Signing & Capabilities:
-
-- **App Sandbox**: enable. Under it, check **Hardware → Audio Input**.
-- If you want system-audio capture (the Channel 2 / remote-participant
-  path): add the **Audio Recording (ScreenCaptureKit)** capability, which
-  requires the **Screen Recording** permission at runtime — macOS will
-  prompt the user; there is no Info.plist key that suppresses this prompt.
-
-Add these Info.plist keys (Xcode's target editor → Info tab):
-
-| Key | Purpose |
-|---|---|
-| `NSMicrophoneUsageDescription` | Required for `AVAudioEngine`/`AVCaptureDevice` microphone access. Explain why (on-device transcription). |
-| `NSSpeechRecognitionUsageDescription` | Only needed if you use Apple's `Speech` framework anywhere alongside WhisperKit. |
-
-## 5. Implement the real services
+## 3. Implement the real services
 
 Write concrete types conforming to the five protocols in
-`Sources/ScribeCore/Services/`:
+`Sources/InnerEarCore/Services/`:
 
 - `AudioCaptureService` → back with `AVAudioEngine` (microphone) +
   `ScreenCaptureKit` (system audio).
-- `TranscriptionService` → back with WhisperKit's `WhisperKit` pipeline.
+- `TranscriptionService` → back with WhisperKit's pipeline.
 - `DiarizationService` → on-device diarization (WhisperKit has experimental
   diarization support; evaluate against Core ML alternatives).
 - `SummarizationService` → local Core ML LLM to start; cloud backend is a
@@ -83,9 +56,44 @@ Write concrete types conforming to the five protocols in
 
 Keep each implementation in its own file next to the protocol, e.g.
 `WhisperKitTranscriptionService.swift`, so the protocol file stays a pure
-contract.
+contract. Wire them into `InnerEarCLI/CLI.swift`'s command handlers once they
+exist, replacing the "not yet implemented" stubs.
 
-## 6. Run it
+Run the CLI against real audio with `swift run innerear record`; the first
+run triggers the standard macOS microphone (and, if `--no-system-audio` is
+omitted, Screen Recording) permission prompt.
 
-Cmd+R in Xcode. Grant the microphone (and, if used, screen recording) prompt
-when it appears.
+## 4. Optional: wrap InnerEarCore in a macOS GUI App (Xcode, for App Store distribution)
+
+1. Xcode → File → New → Project → macOS → App.
+2. Product Name: `InnerEar`. Interface: SwiftUI. Language: Swift.
+3. Save it as a sibling folder, e.g. `inner-ear/App/`, or anywhere convenient
+   — it does not need to be inside `Sources/`.
+4. File → Add Package Dependencies → Add Local... → select the `inner-ear/`
+   directory (the one with `Package.swift`). Add `InnerEarCore` as a
+   dependency of the App target (not `InnerEarCLI` — that's terminal-only).
+5. Replace the generated `InnerEarApp.swift` with something like:
+
+   ```swift
+   import SwiftUI
+   import InnerEarCore
+
+   @main
+   struct InnerEarApp: App {
+       var body: some Scene {
+           WindowGroup {
+               // Wire the same real service implementations from InnerEarCore
+               // used by the CLI.
+               Text("Wire real services here")
+           }
+       }
+   }
+   ```
+
+6. In the App target's Signing & Capabilities: enable **App Sandbox**, check
+   **Hardware → Audio Input**, and add the **Audio Recording
+   (ScreenCaptureKit)** capability for system-audio capture (Screen Recording
+   permission is requested at runtime — no Info.plist key suppresses it).
+7. Add Info.plist key `NSMicrophoneUsageDescription` (required for mic
+   access; explain it's for on-device transcription).
+8. Cmd+R to run.

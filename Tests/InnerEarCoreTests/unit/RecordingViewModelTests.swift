@@ -1,5 +1,5 @@
 import XCTest
-@testable import ScribeCore
+@testable import InnerEarCore
 
 // @unit — pure orchestration logic against fakes; no real audio/Core ML/filesystem I/O.
 @MainActor

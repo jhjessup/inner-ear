@@ -1,7 +1,7 @@
 import Foundation
-@testable import ScribeCore
+@testable import InnerEarCore
 
-// Shared test doubles for all ScribeCoreTests targets — see TEST_DOCTRINE.md AX-P5.
+// Shared test doubles for all InnerEarCoreTests targets — see TEST_DOCTRINE.md AX-P5.
 // None of these touch real audio hardware, Core ML, the network, or the filesystem.
 
 final class FakeAudioCaptureService: AudioCaptureService, @unchecked Sendable {

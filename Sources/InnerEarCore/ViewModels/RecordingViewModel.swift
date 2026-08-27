@@ -3,7 +3,7 @@ import Observation
 
 /// Orchestrates a single record → transcribe → diarize → summarize run for
 /// the SwiftUI layer. Depends only on protocols so it can be unit tested
-/// with fakes — see Tests/ScribeCoreTests/unit/RecordingViewModelTests.swift.
+/// with fakes — see Tests/InnerEarCoreTests/unit/RecordingViewModelTests.swift.
 @Observable
 @MainActor
 public final class RecordingViewModel {

@@ -1,5 +1,5 @@
 import XCTest
-@testable import ScribeCore
+@testable import InnerEarCore
 
 // @service — exercises each service protocol directly (not through the ViewModel/UI),
 // per TEST_DOCTRINE.md AX-P4. These use fakes now; once real WhisperKit/Core ML-backed
