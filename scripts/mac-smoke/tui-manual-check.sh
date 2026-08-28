@@ -67,11 +67,21 @@ non-interactive input.
    - Confirm a progress bar ("[████░░░░░░...]") and a "Step N of 3" line
      appear alongside each status update, and that the bar visibly fills
      further at each of the 3 steps (Transcribing = 1/3 filled,
-     Diarizing = 2/3, Summarizing = full). This bar does NOT animate
-     smoothly WITHIN a step — the run loop blocks on each phase's real
-     work with no background redraw — so a "frozen" bar for the (up to
-     tens of seconds) duration of a single step is expected and correct,
-     not a bug; only the jump between steps should be visible.
+     Diarizing = 2/3, Summarizing = full). The BAR itself does NOT animate
+     smoothly within a step (it only jumps between steps) — that part is
+     expected, not a bug.
+   - During the Transcribing step specifically, confirm the STATUS LINE
+     (not the bar) updates live and repeatedly: "Transcribing... (12
+     words so far)" -> "Transcribing... (37 words so far)" -> etc.,
+     genuinely increasing roughly every 0.2-1s while WhisperKit is
+     decoding, not just frozen at one number until the step completes.
+     This comes from a real WhisperKit progress callback that can fire
+     from a background thread — if the app hangs, crashes, or the
+     terminal display corrupts/garbles specifically during this step
+     (as opposed to just not updating), that's the concurrency risk this
+     feature was reviewed for; report the exact symptom. Diarizing and
+     Summarizing do NOT get live word counts (out of scope for this
+     pass) — only their static status line + bar-step-jump is expected.
 
 6. Scroll and export results:
    - Confirm each line of the transcript is RENDERED, not echoed: every
