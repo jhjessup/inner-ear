@@ -8,7 +8,8 @@ let package = Package(
     ],
     products: [
         .executable(name: "innerear", targets: ["InnerEarCLI"]),
-        .library(name: "InnerEarCore", targets: ["InnerEarCore"])
+        .library(name: "InnerEarCore", targets: ["InnerEarCore"]),
+        .library(name: "InnerEarTUIKit", targets: ["InnerEarTUIKit"])
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0"),
@@ -18,7 +19,11 @@ let package = Package(
         // First target: the CLI front end to the core engine.
         .executableTarget(
             name: "InnerEarCLI",
-            dependencies: ["InnerEarCore", .product(name: "ArgumentParser", package: "swift-argument-parser")]
+            dependencies: [
+                "InnerEarCore",
+                "InnerEarTUIKit",
+                .product(name: "ArgumentParser", package: "swift-argument-parser")
+            ]
         ),
         .target(
             name: "InnerEarCore",
@@ -26,9 +31,17 @@ let package = Package(
                 .product(name: "WhisperKit", package: "WhisperKit"),
             ]
         ),
+        .target(
+            name: "InnerEarTUIKit",
+            dependencies: ["InnerEarCore"]
+        ),
         .testTarget(
             name: "InnerEarCoreTests",
             dependencies: ["InnerEarCore"]
+        ),
+        .testTarget(
+            name: "InnerEarTUIKitTests",
+            dependencies: ["InnerEarTUIKit"]
         )
     ]
 )
