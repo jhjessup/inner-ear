@@ -197,6 +197,32 @@ struct TUIRendererTests {
     }
 
     @Test
+    func record_idle_and_prompting_haveDistinctFootersAndContent() {
+        // The idle->prompting transition (both reached via Enter, back to
+        // back) needs to be visibly distinct, not two indistinguishable
+        // "press Enter" moments.
+        let idleState = TUIState(focusedPane: .detail, selectedSection: 0, record: .idle)
+        let promptingState = TUIState(focusedPane: .detail, selectedSection: 0, record: .prompting)
+        let idleLines = TUIRenderer.render(state: idleState, width: 80, height: 24).joined(separator: "\n")
+        let promptingLines = TUIRenderer.render(state: promptingState, width: 80, height: 24).joined(separator: "\n")
+        #expect(idleLines != promptingLines)
+
+        let idleFooter = TUIRenderer.footerText(for: idleState)
+        let promptingFooter = TUIRenderer.footerText(for: promptingState)
+        #expect(idleFooter.contains("Start Recording"))
+        #expect(promptingFooter.contains("[y]"))
+        #expect(promptingFooter.contains("[n]"))
+        #expect(!promptingFooter.contains("Enter"), "Enter does nothing while prompting for y/n; footer shouldn't advertise it")
+        #expect(idleFooter != promptingFooter)
+    }
+
+    @Test
+    func record_saved_footerAdvertisesProcessNow() {
+        let state = TUIState(focusedPane: .detail, selectedSection: 0, record: .saved(makeRecording()))
+        #expect(TUIRenderer.footerText(for: state).contains("Process Now"))
+    }
+
+    @Test
     func record_recording_rendersTimerAndStopHint() {
         let state = TUIState(
             focusedPane: .detail,
@@ -398,6 +424,44 @@ struct TUIRendererTests {
         let joined = lines.joined(separator: "\n")
         #expect(joined.contains("[AT] Both"))
         #expect(joined.contains("[A-] AudioOnly"))
+    }
+
+    @Test
+    func recordings_list_trailingField_showsDurationAndWordCount_notASecondDateStamp() {
+        // Regression test: the row used to append a second, differently-
+        // formatted date/time stamp after the title (which already embeds
+        // its own "yyyy-MM-dd HH:mm:ss"). The last field is now duration
+        // (+ word count once transcribed), not a redundant timestamp.
+        let withTranscript = RecordingListEntry(
+            recording: makeRecording(title: "Both"), // duration: 60 -> "01:00"
+            hasAudio: true,
+            transcript: makeTranscript(), // fullText: "Hello world, this is a test transcript." -> 7 words
+            summary: nil,
+            transcriptFileURL: URL(fileURLWithPath: "/tmp/t.json")
+        )
+        let audioOnly = RecordingListEntry(
+            recording: Recording(
+                id: UUID(uuidString: "44444444-5555-6666-7777-888888888888")!,
+                title: "AudioOnly",
+                createdAt: Date(timeIntervalSince1970: 1_000_000),
+                duration: 10, // -> "00:10"
+                microphoneFileURL: URL(fileURLWithPath: "/tmp/audioonly2.caf")
+            ),
+            hasAudio: true,
+            transcript: nil,
+            summary: nil,
+            transcriptFileURL: nil
+        )
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: [withTranscript, audioOnly], selectedIndex: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("01:00, 7 words"))
+        #expect(joined.contains("00:10"))
+        #expect(!joined.contains("00:10,"), "no-transcript entry should show duration only, no word count")
     }
 
     @Test

@@ -174,9 +174,28 @@ public enum TUIRenderer {
     private static func renderRecordDetail(state: TUIState, width: Int) -> [String] {
         switch state.record {
         case .idle:
-            return ["Press Enter to start a new recording."]
+            // Both .idle and .prompting are reached via Enter, back to back,
+            // with nothing else changing in between — a plain single line
+            // here reads as no visible response to the first Enter at all.
+            // A heading plus a blank separator line makes the transition
+            // from "just entered this section" to "now on step 1" visually
+            // distinct, and the footer (see footerText) spells out that
+            // this Enter specifically starts a recording, not a generic
+            // "[Enter] Confirm".
+            return [
+                "Record",
+                "",
+                "Press Enter to start a new recording."
+            ]
         case .prompting:
-            return ["Include system audio? [y/n]"]
+            return [
+                "New Recording",
+                "",
+                "Include system audio?",
+                "",
+                "[y] Yes, capture system audio too",
+                "[n] No, microphone only"
+            ]
         case .recording(let startedAt, let captureSystemAudio):
             // Same MM:SS elapsed computation as the old renderRecording
             // helper, plus the [s] Stop hint.
@@ -242,9 +261,6 @@ public enum TUIRenderer {
         if entries.isEmpty {
             return ["No recordings yet."]
         }
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
 
         // Reserve 4 lines at the bottom of the content area for the
         // attribute bar (blank separator + Captured / Audio / Transcript).
@@ -257,10 +273,16 @@ public enum TUIRenderer {
         var lines: [String] = []
         for i in startIndex..<endIndex {
             let entry = entries[i]
-            let dateStr = formatter.string(from: entry.recording.createdAt)
             let prefix = (i == selectedIndex) ? "> " : "  "
             let marker = "[\(entry.hasAudio ? "A" : "-")\(entry.hasTranscript ? "T" : "-")]"
-            let line = "\(prefix)\(marker) \(entry.recording.title)  —  \(dateStr)"
+            // The title already embeds its own capture timestamp
+            // ("Recording yyyy-MM-dd HH:mm:ss" — see AVFoundationAudioCaptureService),
+            // so appending a SECOND, differently-formatted date/time here was
+            // pure redundancy on an already-tight row. The last field is now
+            // the recording's duration, plus a word count once it has a
+            // transcript — information the title/marker don't already carry.
+            let trailing = trailingSummary(for: entry)
+            let line = "\(prefix)\(marker) \(entry.recording.title)  —  \(trailing)"
             lines.append(pad(line, width: width))
         }
 
@@ -402,6 +424,18 @@ public enum TUIRenderer {
         return String(format: "%02d:%02d", minutes, seconds)
     }
 
+    /// The last field on a Recordings-list row: the recording's duration,
+    /// plus a word count once a transcript exists. Replaces a second,
+    /// redundant date/time stamp (the title already has one).
+    private static func trailingSummary(for entry: RecordingListEntry) -> String {
+        let duration = formatSegmentTime(entry.recording.duration)
+        guard let transcript = entry.transcript else {
+            return duration
+        }
+        let wordCount = transcript.fullText.split(separator: " ").count
+        return "\(duration), \(wordCount) words"
+    }
+
     /// Render a discrete (not animated) progress bar for the processing
     /// pipeline: `stepIndex` filled out of `processingTotalSteps` total.
     ///
@@ -473,8 +507,13 @@ public enum TUIRenderer {
         switch state.selectedSection {
         case 0:
             switch state.record {
-            case .idle, .prompting, .saved:
-                return "[Enter] Confirm  [Tab] Nav  [Esc] Back"
+            case .idle:
+                return "[Enter] Start Recording  [Tab] Nav  [Esc] Back"
+            case .prompting:
+                // Enter does nothing here — y/n do — so don't advertise it.
+                return "[y] Yes  [n] No  [Esc] Cancel"
+            case .saved:
+                return "[Enter] Process Now  [Tab] Nav  [Esc] Back"
             case .recording:
                 // Already covered above, but defensive.
                 return "[s]/[Esc] Stop"
