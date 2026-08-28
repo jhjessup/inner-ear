@@ -111,6 +111,64 @@ struct TUIRendererTests {
     }
 
     @Test
+    func navRow_focusedSelected_usesSameMarkerShapeAsList_focusedSelected() {
+        // Regression test: the nav pane's focused+selected row used to be
+        // bracket-wrapped ("[> Name ]") while the Recordings list's focused
+        // row was a bare "> " — the same concept (this row currently has
+        // keyboard focus) rendered as two different shapes depending on
+        // which pane it was in. Both must now use the identical "> " prefix.
+        let navFocusedState = TUIState(focusedPane: .navigation, selectedSection: 1)
+        let navLines = TUIRenderer.render(state: navFocusedState, width: 80, height: 24)
+        let navRow = navLines.first { $0.contains("Recordings") }
+        #expect(navRow != nil)
+        #expect(navRow!.contains("> Recordings"))
+        #expect(!navRow!.contains("[>"), "nav pane should no longer use bracket-wrapped markers")
+
+        let entries = [
+            RecordingListEntry(recording: makeRecording(title: "Row"), hasAudio: true, transcript: nil, summary: nil, transcriptFileURL: nil)
+        ]
+        let listFocusedState = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: entries, selectedIndex: 0)
+        )
+        let listLines = TUIRenderer.render(state: listFocusedState, width: 80, height: 24)
+        let listRow = listLines.first { $0.contains("Row") }
+        #expect(listRow != nil)
+        #expect(listRow!.contains("> [A-] Row"), "focused list row should use the same '> ' prefix as the focused nav row")
+    }
+
+    @Test
+    func navRow_selectedButNotFocused_andListRow_selectedButNotFocused_useSameDashMarker() {
+        // The "selected but focus is on the other pane" state must also
+        // match between panes — both use "- " now (previously the nav
+        // pane used a bare "> " for this state too, which collided visually
+        // with the Recordings list's OWN focused-row marker).
+        let navUnfocusedState = TUIState(focusedPane: .detail, selectedSection: 1)
+        let navLines = TUIRenderer.render(state: navUnfocusedState, width: 80, height: 24)
+        let navRow = navLines.first { $0.contains("Recordings") }
+        #expect(navRow != nil)
+        #expect(navRow!.contains("- Recordings"))
+
+        let entries = [
+            RecordingListEntry(recording: makeRecording(title: "Row"), hasAudio: true, transcript: nil, summary: nil, transcriptFileURL: nil)
+        ]
+        // The list's row is "selected but not focused" whenever the OUTER
+        // pane focus is .navigation (the list can't itself be browsed
+        // without detail focus, but it still shows its remembered
+        // selection as a preview).
+        let listUnfocusedState = TUIState(
+            focusedPane: .navigation,
+            selectedSection: 1,
+            recordings: .list(entries: entries, selectedIndex: 0)
+        )
+        let listLines = TUIRenderer.render(state: listUnfocusedState, width: 80, height: 24)
+        let listRow = listLines.first { $0.contains("Row") }
+        #expect(listRow != nil)
+        #expect(listRow!.contains("- [A-] Row"))
+    }
+
+    @Test
     func render_includesInnerEarTitle() {
         let state = TUIState()
         let lines = TUIRenderer.render(state: state, width: 80, height: 24)

@@ -127,18 +127,36 @@ public enum TUIRenderer {
 
     /// Renders one row of the nav pane. The first 3 rows are the section
     /// names; the rest is left blank.
+    ///
+    /// Marker convention (shared with the Recordings list's row markers —
+    /// see `selectionPrefix(isSelected:isFocused:)` — so "where the user's
+    /// keyboard focus actually is" always looks the same regardless of
+    /// which pane that happens to be):
+    ///   `"> "` — this row has actual keyboard focus right now.
+    ///   `"- "` — selected, but focus is currently on the other pane.
+    ///   `"  "` — neither.
+    /// (The nav pane previously used a bracket-wrapped `"[> Name ]"` for
+    /// the focused case and a bare `"> Name"` for the selected-not-focused
+    /// case — two different shapes for two different concepts, but the
+    /// Recordings list only ever drew the bare arrow, so the SAME concept
+    /// — "this is where you actually are" — looked different depending on
+    /// which pane it was in. This unifies both to the 3-tier convention
+    /// above.)
     private static func renderNavRow(index: Int, state: TUIState) -> String {
         guard index >= 0 && index < 3 else { return "" }
         let name = tuiSectionNames[index]
-        if state.focusedPane == .navigation && index == state.selectedSection {
-            // Focused and selected: square brackets + arrow.
-            return pad("[> \(name) ]", width: navPaneWidth)
-        } else if index == state.selectedSection {
-            // Selected but focus is on detail pane: plain arrow.
-            return pad("> \(name) ", width: navPaneWidth)
-        } else {
-            return pad("  \(name) ", width: navPaneWidth)
-        }
+        let isSelected = index == state.selectedSection
+        let isFocused = state.focusedPane == .navigation
+        let prefix = selectionPrefix(isSelected: isSelected, isFocused: isFocused)
+        return pad("\(prefix)\(name)", width: navPaneWidth)
+    }
+
+    /// Shared selection-marker prefix — see `renderNavRow`'s doc comment
+    /// for why this must be identical wherever a "which row currently has
+    /// keyboard focus" indicator is drawn.
+    private static func selectionPrefix(isSelected: Bool, isFocused: Bool) -> String {
+        guard isSelected else { return "  " }
+        return isFocused ? "> " : "- "
     }
 
     // MARK: - Detail pane
@@ -224,7 +242,13 @@ public enum TUIRenderer {
     private static func renderRecordingsDetail(state: TUIState, width: Int, height: Int) -> [String] {
         switch state.recordings {
         case .list(let entries, let selectedIndex):
-            return renderRecordingsList(entries: entries, selectedIndex: selectedIndex, width: width, height: height)
+            return renderRecordingsList(
+                entries: entries,
+                selectedIndex: selectedIndex,
+                width: width,
+                height: height,
+                isFocused: state.focusedPane == .detail
+            )
 
         case .confirmGenerateTranscript(let entries, let selectedIndex):
             return renderConfirmGenerateTranscript(entries: entries, selectedIndex: selectedIndex, width: width)
@@ -257,7 +281,7 @@ public enum TUIRenderer {
     /// row. The attribute bar reserves a fixed 4 rows (blank separator +
     /// 3 info lines) from the list's height budget, so the list's windowing
     /// math sees a smaller content height than the caller passed in.
-    private static func renderRecordingsList(entries: [RecordingListEntry], selectedIndex: Int, width: Int, height: Int) -> [String] {
+    private static func renderRecordingsList(entries: [RecordingListEntry], selectedIndex: Int, width: Int, height: Int, isFocused: Bool) -> [String] {
         if entries.isEmpty {
             return ["No recordings yet."]
         }
@@ -273,7 +297,7 @@ public enum TUIRenderer {
         var lines: [String] = []
         for i in startIndex..<endIndex {
             let entry = entries[i]
-            let prefix = (i == selectedIndex) ? "> " : "  "
+            let prefix = selectionPrefix(isSelected: i == selectedIndex, isFocused: isFocused)
             let marker = "[\(entry.hasAudio ? "A" : "-")\(entry.hasTranscript ? "T" : "-")]"
             // The title already embeds its own capture timestamp
             // ("Recording yyyy-MM-dd HH:mm:ss" — see AVFoundationAudioCaptureService),
