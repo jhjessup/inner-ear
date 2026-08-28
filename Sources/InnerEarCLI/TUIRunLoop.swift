@@ -20,14 +20,28 @@ enum TUIRunLoop {
         let rawMode = try RawTerminalMode()
         defer { rawMode.restore() }
 
-        installSignalHandlers {
-            rawMode.restore()
-        }
-
         // `store` is mutable because `.saveDataDirectory` may need to
         // rebuild it (a fresh `RecordingStore` reads the (possibly new)
-        // config.json from disk on init).
-        var store = store
+        // config.json from disk on init). Boxed in a class (rather than a
+        // plain `var`) so the SIGINT/SIGTERM cleanup closure below can
+        // capture a stable reference and always see the latest store,
+        // instead of capturing a mutable local var across a concurrency
+        // boundary (which Swift 6 strict concurrency disallows).
+        let storeBox = StoreBox(store)
+
+        // Ctrl-C/SIGTERM must never silently discard an in-progress
+        // recording. `stopCapture()` throws `.noActiveCapture` (caught by
+        // `try?`, becoming a harmless no-op) when nothing is recording, so
+        // this can run unconditionally on every interrupt without needing
+        // to inspect `state` from outside the run loop.
+        installSignalHandlers(
+            restoreAction: { rawMode.restore() },
+            cleanup: {
+                if let recording = try? await audioCapture.stopCapture() {
+                    try? storeBox.store.save(recording)
+                }
+            }
+        )
 
         var state = TUIState()
 
@@ -45,8 +59,9 @@ enum TUIRunLoop {
         }
 
         while true {
-            // 1. Read key (non-blocking)
-            if let key = readKeyNonBlocking() {
+            // 1. Read key (non-blocking) — includes arrow-key recognition,
+            // mapped to the same j/k the controller already understands.
+            if let key = readKeyOrArrowNonBlocking() {
                 let (nextState, effects) = TUIController.reduce(state, .key(key))
                 state = nextState
 
@@ -69,12 +84,12 @@ enum TUIRunLoop {
 
                         case .stopRecording:
                             let recording = try await audioCapture.stopCapture()
-                            try store.save(recording)
+                            try storeBox.store.save(recording)
                             state.record = .saved(recording)
                             renderNow()
 
                         case .loadRecordings:
-                            let recordings = try store.listRecordings()
+                            let recordings = try storeBox.store.listRecordings()
                             state.recordings = .list(recordings: recordings, selectedIndex: 0)
                             renderNow()
 
@@ -102,8 +117,8 @@ enum TUIRunLoop {
                             let summary = try await summarization.summarize(transcript: diarizedTranscript)
 
                             // Persist results
-                            try store.save(diarizedTranscript)
-                            try store.save(summary)
+                            try storeBox.store.save(diarizedTranscript)
+                            try storeBox.store.save(summary)
 
                             // Transition to results view
                             state.recordings = .viewingResults(
@@ -144,7 +159,7 @@ enum TUIRunLoop {
                             // delay — readKeyNonBlocking() already blocks for
                             // up to VTIME's 0.1s per call (see RawTerminalMode),
                             // so this loop is self-pacing without spinning.
-                            while readKeyNonBlocking() == nil {}
+                            while readKeyOrArrowNonBlocking() == nil {}
 
                         case .loadConfigStatus:
                             let (url, sourceInfo) = InnerEarConfigResolver.resolveDataDirectoryWithSource()
@@ -173,7 +188,7 @@ enum TUIRunLoop {
                             }
                             // Success path.
                             do {
-                                store = try RecordingStore()
+                                storeBox.store = try RecordingStore()
                             } catch {
                                 state.modal = .error("\(error)")
                                 renderNow()
@@ -190,7 +205,7 @@ enum TUIRunLoop {
                             // reason, fall back to an empty list rather
                             // than surfacing another error here — the
                             // user can always re-enter the pane to retry.
-                            let recordings = (try? store.listRecordings()) ?? []
+                            let recordings = (try? storeBox.store.listRecordings()) ?? []
                             state.recordings = .list(recordings: recordings, selectedIndex: 0)
                             renderNow()
 
@@ -224,6 +239,37 @@ enum TUIRunLoop {
         case .envVar:          return .envVar
         case .configFile:      return .configFile
         case .defaultLocation: return .defaultLocation
+        }
+    }
+}
+
+/// Mutable-reference holder for `RecordingStore`, so the SIGINT/SIGTERM
+/// cleanup closure in `run(...)` can capture a stable reference and always
+/// observe the latest store (after a `.saveDataDirectory` reassignment)
+/// instead of capturing a `var` local across a concurrency boundary, which
+/// Swift 6 strict concurrency disallows. A signal can fire at any moment,
+/// including concurrently with the main run loop reassigning `store` mid-
+/// `.saveDataDirectory` — so this is genuinely accessed from two contexts
+/// at once, not just formally, and needs real synchronization rather than
+/// an `@unchecked Sendable` free pass on a plain `var`.
+private final class StoreBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _store: RecordingStore
+
+    init(_ store: RecordingStore) {
+        self._store = store
+    }
+
+    var store: RecordingStore {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _store
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _store = newValue
         }
     }
 }
