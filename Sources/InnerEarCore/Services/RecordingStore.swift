@@ -100,6 +100,73 @@ public final class RecordingStore: Sendable {
         return try read(Summary.self, from: url, id: id)
     }
 
+    // MARK: - Recordings/Transcripts listing & deletion
+
+    public func listTranscripts() throws -> [Transcript] {
+        let directory = baseDirectory.appendingPathComponent("transcripts", isDirectory: true)
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "json" }
+        return files.compactMap { url in
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            return try? decoder.decode(Transcript.self, from: data)
+        }
+    }
+
+    public func listSummaries() throws -> [Summary] {
+        let directory = baseDirectory.appendingPathComponent("summaries", isDirectory: true)
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "json" }
+        return files.compactMap { url in
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            return try? decoder.decode(Summary.self, from: data)
+        }
+    }
+
+    public func transcriptFileURL(for transcript: Transcript) -> URL {
+        baseDirectory
+            .appendingPathComponent("transcripts", isDirectory: true)
+            .appendingPathComponent("\(transcript.id.uuidString).json", isDirectory: false)
+    }
+
+    public func deleteAudioFiles(for recording: Recording) throws {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: recording.microphoneFileURL.path) {
+            try fm.removeItem(at: recording.microphoneFileURL)
+        }
+        if let sysURL = recording.systemAudioFileURL, fm.fileExists(atPath: sysURL.path) {
+            try fm.removeItem(at: sysURL)
+        }
+        // Best-effort: remove the now-possibly-empty containing directory.
+        // `try?` because this fails harmlessly if the directory still has
+        // other content or doesn't exist — that's fine, not an error case.
+        try? fm.removeItem(at: recording.microphoneFileURL.deletingLastPathComponent())
+    }
+
+    public func deleteTranscript(_ transcript: Transcript) throws {
+        let url = transcriptFileURL(for: transcript)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+        // Best-effort cleanup of the matching summary (linked via transcriptID),
+        // if one exists — don't fail the whole delete if this part fails.
+        if let summaries = try? listSummaries(),
+           let match = summaries.first(where: { $0.transcriptID == transcript.id }) {
+            let summaryURL = baseDirectory
+                .appendingPathComponent("summaries", isDirectory: true)
+                .appendingPathComponent("\(match.id.uuidString).json", isDirectory: false)
+            try? FileManager.default.removeItem(at: summaryURL)
+        }
+    }
+
+    public func deleteRecordingCatalogEntry(_ id: UUID) throws {
+        let url = baseDirectory
+            .appendingPathComponent("recordings", isDirectory: true)
+            .appendingPathComponent("\(id.uuidString).json", isDirectory: false)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
     // MARK: - Private Helpers
 
     private func write<T: Encodable>(_ value: T, to url: URL) throws {

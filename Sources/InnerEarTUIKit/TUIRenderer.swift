@@ -199,8 +199,14 @@ public enum TUIRenderer {
     /// wrap-and-clamp math, but without the per-pane footer line.
     private static func renderRecordingsDetail(state: TUIState, width: Int, height: Int) -> [String] {
         switch state.recordings {
-        case .list(let recordings, let selectedIndex):
-            return renderRecordingsList(recordings: recordings, selectedIndex: selectedIndex, width: width, height: height)
+        case .list(let entries, let selectedIndex):
+            return renderRecordingsList(entries: entries, selectedIndex: selectedIndex, width: width, height: height)
+
+        case .confirmGenerateTranscript(let entries, let selectedIndex):
+            return renderConfirmGenerateTranscript(entries: entries, selectedIndex: selectedIndex, width: width)
+
+        case .confirmDelete(let entries, let selectedIndex):
+            return renderConfirmDelete(entries: entries, selectedIndex: selectedIndex, width: width)
 
         case .processing(let recording, let statusLine):
             return [
@@ -220,33 +226,90 @@ public enum TUIRenderer {
     }
 
     /// Replicates the OLD `renderBrowsing` logic (centered window around
-    /// `selectedIndex`, no footer).
-    private static func renderRecordingsList(recordings: [Recording], selectedIndex: Int, width: Int, height: Int) -> [String] {
-        if recordings.isEmpty {
+    /// `selectedIndex`, no footer), plus an attribute bar below the list
+    /// showing capture time + full file paths for the currently-selected
+    /// row. The attribute bar reserves a fixed 4 rows (blank separator +
+    /// 3 info lines) from the list's height budget, so the list's windowing
+    /// math sees a smaller content height than the caller passed in.
+    private static func renderRecordingsList(entries: [RecordingListEntry], selectedIndex: Int, width: Int, height: Int) -> [String] {
+        if entries.isEmpty {
             return ["No recordings yet."]
         }
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
 
-        let contentHeight = max(1, height)
-        let startIndex = max(0, min(selectedIndex - contentHeight / 2, recordings.count - contentHeight))
-        let endIndex = min(startIndex + contentHeight, recordings.count)
+        // Reserve 4 lines at the bottom of the content area for the
+        // attribute bar (blank separator + Captured / Audio / Transcript).
+        let attributeBarReserved = 4
+        let listHeight = max(1, height - attributeBarReserved)
+
+        let startIndex = max(0, min(selectedIndex - listHeight / 2, entries.count - listHeight))
+        let endIndex = min(startIndex + listHeight, entries.count)
 
         var lines: [String] = []
         for i in startIndex..<endIndex {
-            let recording = recordings[i]
-            let dateStr = formatter.string(from: recording.createdAt)
+            let entry = entries[i]
+            let dateStr = formatter.string(from: entry.recording.createdAt)
             let prefix = (i == selectedIndex) ? "> " : "  "
-            let line = "\(prefix)\(recording.title)  —  \(dateStr)"
+            let marker = "[\(entry.hasAudio ? "A" : "-")\(entry.hasTranscript ? "T" : "-")]"
+            let line = "\(prefix)\(marker) \(entry.recording.title)  —  \(dateStr)"
             lines.append(pad(line, width: width))
         }
+
+        // Attribute bar — reflects `entries[selectedIndex]`. Reads the
+        // current `selectedIndex` from the .list case's associated value
+        // each render so it updates live as the user presses j/k. Always
+        // shows (entries are guaranteed non-empty at this point).
+        let selected = entries[selectedIndex]
+        let captureFormatter = DateFormatter()
+        captureFormatter.dateStyle = .medium
+        captureFormatter.timeStyle = .medium
+        let capturedStr = captureFormatter.string(from: selected.recording.createdAt)
+        let audioPath = selected.recording.microphoneFileURL.path
+        let audioExtra = selected.recording.systemAudioFileURL != nil ? " (+ system audio)" : ""
+        let transcriptPath = selected.transcriptFileURL?.path ?? "— not yet generated —"
+        let audioLabel = selected.hasAudio ? "\(audioPath)\(audioExtra)" : "— not present —"
+
+        lines.append("") // blank separator between list and attribute bar
+        lines.append(pad("Captured: \(capturedStr)", width: width))
+        lines.append(pad("Audio: \(audioLabel)", width: width))
+        lines.append(pad("Transcript: \(transcriptPath)", width: width))
+
         return lines
+    }
+
+    /// `.confirmGenerateTranscript` — single-question confirm dialog.
+    private static func renderConfirmGenerateTranscript(entries: [RecordingListEntry], selectedIndex: Int, width: Int) -> [String] {
+        let title = entries[selectedIndex].recording.title
+        return [
+            "\"\(title)\" has no transcript yet.",
+            "",
+            "Generate one now? [y/n]"
+        ].map { pad($0, width: width) }
+    }
+
+    /// `.confirmDelete` — sub-menu for choosing which artifact(s) to delete.
+    private static func renderConfirmDelete(entries: [RecordingListEntry], selectedIndex: Int, width: Int) -> [String] {
+        let title = entries[selectedIndex].recording.title
+        return [
+            "Delete for \"\(title)\":",
+            "",
+            "[a] Audio only   [t] Transcript only   [b] Both   [Esc] Cancel"
+        ].map { pad($0, width: width) }
     }
 
     /// Replicates the OLD `renderViewingResults` wrap + scroll-clamp math
     /// exactly, but without its per-pane footer (the global footer at the
     /// bottom of the frame now serves that role).
+    ///
+    /// The OLD implementation used `transcript.fullText` — segments
+    /// concatenated into one flat blob — which discarded per-segment
+    /// timestamps and speaker attribution. The new "rendered, not echoed"
+    /// construction builds ONE "paragraph" per segment (joined with blank
+    /// lines) so the wrap/scroll logic treats each segment as a distinct
+    /// scrollable unit while keeping all the downstream clamping math
+    /// unchanged.
     private static func renderRecordingsResults(
         transcript: Transcript,
         summary: Summary?,
@@ -254,7 +317,16 @@ public enum TUIRenderer {
         width: Int,
         height: Int
     ) -> [String] {
-        var fullText = transcript.fullText
+        // Per-segment paragraphs: "[MM:SS] SpeakerLabel: text". One segment
+        // = one paragraph, joined with blank lines so the wrap/split loop
+        // below treats them as distinct visual blocks.
+        var paragraphs: [String] = []
+        for segment in transcript.segments {
+            let speakerLabel = transcript.speaker(for: segment)?.label ?? "Unknown"
+            let timestamp = formatSegmentTime(segment.startTime)
+            paragraphs.append("[\(timestamp)] \(speakerLabel): \(segment.text)")
+        }
+        var fullText = paragraphs.joined(separator: "\n\n")
 
         if let summary = summary {
             fullText += "\n\n--- Summary ---\n"
@@ -309,6 +381,18 @@ public enum TUIRenderer {
             return allLines.map { pad($0, width: width) }
         }
         return Array(allLines[start..<end]).map { pad($0, width: width) }
+    }
+
+    /// Format a segment's `startTime` (seconds, possibly fractional) as
+    /// MM:SS for display in the per-segment transcript viewer header.
+    /// Distinct from the recording-elapsed-time formatter in
+    /// `renderRecordDetail` because the inputs come from different sources
+    /// (segment start offset vs. wall-clock `Date`-subtraction elapsed),
+    /// even though they share the same output format.
+    private static func formatSegmentTime(_ time: TimeInterval) -> String {
+        let minutes = Int(time) / 60
+        let seconds = Int(time) % 60
+        return String(format: "%02d:%02d", minutes, seconds)
     }
 
     /// Section 2 (Settings) detail lines.
@@ -370,7 +454,11 @@ public enum TUIRenderer {
         case 1:
             switch state.recordings {
             case .list:
-                return "[j/k] Move  [Enter] Select  [Tab] Nav  [Esc] Back"
+                return "[j/k] Move  [Enter] Select  [d] Delete  [Tab] Nav  [Esc] Back"
+            case .confirmGenerateTranscript:
+                return "[y] Generate  [n]/[Esc] Cancel"
+            case .confirmDelete:
+                return "[a] Audio  [t] Transcript  [b] Both  [Esc] Cancel"
             case .viewingResults:
                 return "[j/k] Scroll  [e] Export  [Tab] Nav  [Esc] Back"
             case .processing:

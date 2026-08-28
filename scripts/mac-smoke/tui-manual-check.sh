@@ -66,6 +66,9 @@ non-interactive input.
      then the Viewing Results screen with your transcript text.
 
 6. Scroll and export results:
+   - Confirm each line of the transcript is RENDERED, not echoed: every
+     segment shows its own "[MM:SS] SpeakerLabel: text" prefix, not just
+     a flat wall of concatenated text.
    - Press j repeatedly — confirm the view scrolls down and stops
      cleanly at the end of content (no crash, no garbage lines).
    - Press k repeatedly — confirm it scrolls back up and stops at the
@@ -76,6 +79,39 @@ non-interactive input.
    - Confirm the "Exporting to ..." / "Exported to: ..." / "[any key]
      Continue" sequence genuinely waits for your keypress — i.e. the
      TUI does NOT resume on its own after a fixed timer.
+
+6a. Recordings list: attributes, browsing an existing recording, delete:
+   - Press Esc from the results screen, then Esc again to return to nav,
+     then Enter back into Recordings. Confirm your just-processed
+     recording now shows an "[AT]" marker (both audio and transcript
+     present) next to its title.
+   - Confirm the attribute bar below the list shows "Captured: ...", an
+     "Audio: <full path>" line, and a "Transcript: <full path>" line for
+     whichever row is currently highlighted — move the j/k selection and
+     confirm the attribute bar updates live to match.
+   - Record a SECOND short clip (Tab to nav, k to Record, Enter, n, wait
+     a couple seconds, s to stop) but do NOT process it — press Esc
+     instead of Enter on the "Recording saved" screen. Navigate to
+     Recordings: confirm this second entry shows an "[A-]" marker (audio
+     only, no transcript yet).
+   - Select the "[A-]" entry and press Enter. Confirm a prompt appears:
+     "<title>" has no transcript yet. Generate one now? [y/n]" — NOT an
+     immediate pipeline run. Press n (or Esc): confirm it returns to the
+     list unchanged. Press Enter again, then y this time: confirm the
+     pipeline now runs (Transcribing.../Diarizing.../Summarizing...) and
+     lands on the results screen, exactly like the already-transcribed
+     path.
+   - Back in the list, select any entry and press d. Confirm a prompt
+     appears: "Delete for "<title>": [a] Audio only  [t] Transcript
+     only  [b] Both  [Esc] Cancel". Press Esc: confirm nothing was
+     deleted and you're back at the list. Press d again, then t: confirm
+     the entry's marker changes to "[A-]" (transcript gone, audio still
+     present) and the attribute bar's Transcript line now reads "not yet
+     generated". Press d, then a: confirm the marker changes to "[--]"
+     and — since NEITHER audio nor transcript remains — the entry
+     disappears from the list entirely on the next reload (this is the
+     "orphaned catalog entry" cleanup; if it doesn't disappear, that's a
+     bug to report).
 
 7. Settings (configurable data directory):
    - Press Tab back to nav, then k until Settings is selected, then
@@ -105,7 +141,7 @@ non-interactive input.
      recordings yet.").
 
 9. Signal handling (the part that CANNOT be verified any other way):
-   - From any screen, press Ctrl-C.
+   - From any screen NOT actively recording, press Ctrl-C.
    - Confirm the program exits immediately AND your terminal is left in
      a normal, usable state: typed characters echo again, and a plain
      `ls` afterward produces normally-formatted output (not run
@@ -113,6 +149,33 @@ non-interactive input.
    - Repeat once more, this time sending SIGTERM instead: run
      `swift run innerear tui &` then `kill %1` from another terminal
      tab, and confirm the same clean-terminal-restoration result.
+   - Now start a recording (Record -> Enter -> n) and, WHILE it's
+     actively recording, press Ctrl-C. Confirm the terminal still
+     restores cleanly (same checks as above — this may take up to ~3
+     seconds since it now tries to save the in-progress recording
+     first, rather than exiting instantly). Relaunch `swift run innerear
+     tui` and check the Recordings list: the recording you were making
+     when you hit Ctrl-C should now appear in the list with an audio
+     file (the "[A-]" marker) — confirm it is NOT silently lost.
+
+9a. Arrow keys:
+   - At the main menu (nav focused), press the Down arrow and Up arrow.
+     Confirm they move the selection exactly like j/k.
+   - Inside the Recordings list, press Down/Up. Confirm they move the
+     row selection like j/k.
+   - Inside a viewed transcript, press Down/Up. Confirm they scroll like
+     j/k.
+   - Press a bare Esc (not part of an arrow sequence) somewhere it's
+     meaningful (e.g. Settings editing). Confirm Esc still behaves
+     normally and isn't misinterpreted as part of an arrow sequence.
+
+9b. Scrollback:
+   - After using the TUI for a while (several screen changes), quit with
+     q from the main menu. Scroll UP in your terminal's normal
+     scrollback (mouse wheel or Shift+PageUp). Confirm you do NOT see a
+     stream of old TUI frames in scrollback — scrollback should show
+     whatever was in your terminal BEFORE you launched `innerear tui`,
+     with no TUI redraw frames mixed in.
 
 10. Resize (exercises the multipane grid math at non-default sizes):
     - While at any screen, shrink and grow your terminal window
@@ -127,6 +190,6 @@ non-interactive input.
       back to the single-line "Terminal too small" message and does
       NOT corrupt the screen with a half-rendered multipane frame.
 
-If all 10 steps pass, the TUI is verified. Note any failures with the
+If all steps pass, the TUI is verified. Note any failures with the
 exact step number and what you observed when reporting back.
 EOF

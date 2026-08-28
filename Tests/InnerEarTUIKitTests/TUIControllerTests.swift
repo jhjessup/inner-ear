@@ -22,6 +22,24 @@ struct TUIControllerTests {
         )
     }
 
+    /// Wrap a list of recordings into `RecordingListEntry` values for the
+    /// newer `.list(entries:...)` shape — defaults to `hasAudio: true`
+    /// (the most permissive default for tests that just want to exercise
+    /// list navigation / Enter → pipeline, which now requires audio to
+    /// be present). Pass `hasAudio: false` to opt into the "neither
+    /// audio nor transcript" no-op-Enter case.
+    private func makeEntries(_ recordings: [Recording], hasAudio: Bool = true) -> [RecordingListEntry] {
+        recordings.map { rec in
+            RecordingListEntry(
+                recording: rec,
+                hasAudio: hasAudio,
+                transcript: nil,
+                summary: nil,
+                transcriptFileURL: nil
+            )
+        }
+    }
+
     private func makeTranscript() -> Transcript {
         let speaker = Speaker(label: "Speaker 1", colorHex: "#3478F6", isLocalUser: true)
         return Transcript(
@@ -198,13 +216,14 @@ struct TUIControllerTests {
     @Test
     func esc_whileList_keepsList_noEffects() {
         let recordings = [makeRecording(title: "A"), makeRecording(title: "B")]
+        let entries = makeEntries(recordings)
         let state = TUIState(
             focusedPane: .navigation,
             selectedSection: 1,
-            recordings: .list(recordings: recordings, selectedIndex: 1)
+            recordings: .list(entries: entries, selectedIndex: 1)
         )
         let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
-        #expect(nextState.recordings == .list(recordings: recordings, selectedIndex: 1))
+        #expect(nextState.recordings == .list(entries: entries, selectedIndex: 1))
         #expect(effects.isEmpty)
     }
 
@@ -439,7 +458,7 @@ struct TUIControllerTests {
         let state = TUIState(
             focusedPane: .detail,
             selectedSection: 1,
-            recordings: .list(recordings: recordings, selectedIndex: 0)
+            recordings: .list(entries: makeEntries(recordings), selectedIndex: 0)
         )
         let (nextState, _) = TUIController.reduce(state, .key("j"))
         if case .list(_, let idx) = nextState.recordings {
@@ -455,7 +474,7 @@ struct TUIControllerTests {
         let state = TUIState(
             focusedPane: .detail,
             selectedSection: 1,
-            recordings: .list(recordings: recordings, selectedIndex: 2)
+            recordings: .list(entries: makeEntries(recordings), selectedIndex: 2)
         )
         let (nextState, _) = TUIController.reduce(state, .key("j"))
         if case .list(_, let idx) = nextState.recordings {
@@ -471,7 +490,7 @@ struct TUIControllerTests {
         let state = TUIState(
             focusedPane: .detail,
             selectedSection: 1,
-            recordings: .list(recordings: recordings, selectedIndex: 2)
+            recordings: .list(entries: makeEntries(recordings), selectedIndex: 2)
         )
         let (nextState, _) = TUIController.reduce(state, .key("k"))
         if case .list(_, let idx) = nextState.recordings {
@@ -487,7 +506,7 @@ struct TUIControllerTests {
         let state = TUIState(
             focusedPane: .detail,
             selectedSection: 1,
-            recordings: .list(recordings: recordings, selectedIndex: 0)
+            recordings: .list(entries: makeEntries(recordings), selectedIndex: 0)
         )
         let (nextState, _) = TUIController.reduce(state, .key("k"))
         if case .list(_, let idx) = nextState.recordings {
@@ -498,21 +517,73 @@ struct TUIControllerTests {
     }
 
     @Test
-    func recordings_list_enter_onNonEmpty_runsPipeline() {
+    func recordings_list_enter_onEntryWithAudioNoTranscript_showsGeneratePrompt() {
+        // Entries from makeEntries default to hasAudio: true, transcript: nil.
+        // Enter must NOT jump straight to the pipeline anymore — it has to
+        // confirm first (this replaces the old runsPipeline-directly test,
+        // which tested behavior this feature deliberately changed).
         let recordings = [makeRecording(title: "A"), makeRecording(title: "B")]
+        let entries = makeEntries(recordings)
         let state = TUIState(
             focusedPane: .detail,
             selectedSection: 1,
-            recordings: .list(recordings: recordings, selectedIndex: 1)
+            recordings: .list(entries: entries, selectedIndex: 1)
         )
         let (nextState, effects) = TUIController.reduce(state, .key("\r"))
-        if case .processing(let rec, let statusLine) = nextState.recordings {
-            #expect(rec.id == recordings[1].id)
-            #expect(statusLine == "Starting...")
+        if case .confirmGenerateTranscript(let e, let idx) = nextState.recordings {
+            #expect(e == entries)
+            #expect(idx == 1)
         } else {
-            #expect(Bool(false))
+            #expect(Bool(false), "Expected .confirmGenerateTranscript")
         }
-        #expect(effects == [.runPipeline(recordings[1])])
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func recordings_list_enter_onEntryWithExistingTranscript_jumpsStraightToResults() {
+        let recording = makeRecording(title: "Has transcript")
+        let transcript = makeTranscript()
+        let summary = makeSummary()
+        let entry = RecordingListEntry(
+            recording: recording,
+            hasAudio: true,
+            transcript: transcript,
+            summary: summary,
+            transcriptFileURL: URL(fileURLWithPath: "/tmp/t.json")
+        )
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: [entry], selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\r"))
+        if case .viewingResults(let t, let s, let offset) = nextState.recordings {
+            #expect(t == transcript)
+            #expect(s == summary)
+            #expect(offset == 0)
+        } else {
+            #expect(Bool(false), "Expected .viewingResults directly, no confirm step")
+        }
+        #expect(effects.isEmpty, "Already-resolved transcript/summary needs no effect")
+    }
+
+    @Test
+    func recordings_list_enter_onEntryWithNeitherAudioNorTranscript_isNoOp() {
+        let entry = RecordingListEntry(
+            recording: makeRecording(),
+            hasAudio: false,
+            transcript: nil,
+            summary: nil,
+            transcriptFileURL: nil
+        )
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: [entry], selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\r"))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
     }
 
     @Test
@@ -520,10 +591,215 @@ struct TUIControllerTests {
         let state = TUIState(
             focusedPane: .detail,
             selectedSection: 1,
-            recordings: .list(recordings: [], selectedIndex: 0)
+            recordings: .list(entries: [], selectedIndex: 0)
         )
         let (nextState, effects) = TUIController.reduce(state, .key("\r"))
         #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func recordings_list_d_onNonEmpty_showsDeletePrompt() {
+        let entries = makeEntries([makeRecording(title: "A")])
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: entries, selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("d"))
+        if case .confirmDelete(let e, let idx) = nextState.recordings {
+            #expect(e == entries)
+            #expect(idx == 0)
+        } else {
+            #expect(Bool(false), "Expected .confirmDelete")
+        }
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func recordings_list_d_onEmpty_isNoOp() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: [], selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("d"))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    // MARK: - Section 1: confirmGenerateTranscript
+
+    @Test
+    func confirmGenerateTranscript_y_startsPipeline() {
+        let recordings = [makeRecording(title: "A"), makeRecording(title: "B")]
+        let entries = makeEntries(recordings)
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .confirmGenerateTranscript(entries: entries, selectedIndex: 1)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("y"))
+        if case .processing(let rec, let statusLine) = nextState.recordings {
+            #expect(rec.id == recordings[1].id)
+            #expect(statusLine == "Starting...")
+        } else {
+            #expect(Bool(false), "Expected .processing")
+        }
+        #expect(effects == [.runPipeline(recordings[1])])
+    }
+
+    @Test
+    func confirmGenerateTranscript_n_returnsToList() {
+        let entries = makeEntries([makeRecording(title: "A")])
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .confirmGenerateTranscript(entries: entries, selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("n"))
+        #expect(nextState.recordings == .list(entries: entries, selectedIndex: 0))
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func confirmGenerateTranscript_esc_returnsToList() {
+        let entries = makeEntries([makeRecording(title: "A")])
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .confirmGenerateTranscript(entries: entries, selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.recordings == .list(entries: entries, selectedIndex: 0))
+        #expect(effects.isEmpty)
+    }
+
+    // MARK: - Section 1: confirmDelete
+
+    @Test
+    func confirmDelete_a_withAudio_emitsDeleteAudioThenLoadRecordings() {
+        let entry = RecordingListEntry(
+            recording: makeRecording(),
+            hasAudio: true,
+            transcript: nil,
+            summary: nil,
+            transcriptFileURL: nil
+        )
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .confirmDelete(entries: [entry], selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("a"))
+        #expect(nextState.recordings == .list(entries: [entry], selectedIndex: 0))
+        #expect(effects == [.deleteAudio(entry.recording), .loadRecordings])
+    }
+
+    @Test
+    func confirmDelete_a_withoutAudio_isNoOpEffect() {
+        let entry = RecordingListEntry(
+            recording: makeRecording(),
+            hasAudio: false,
+            transcript: makeTranscript(),
+            summary: nil,
+            transcriptFileURL: URL(fileURLWithPath: "/tmp/t.json")
+        )
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .confirmDelete(entries: [entry], selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("a"))
+        #expect(nextState.recordings == .list(entries: [entry], selectedIndex: 0))
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func confirmDelete_t_withTranscript_emitsDeleteTranscriptThenLoadRecordings() {
+        let transcript = makeTranscript()
+        let entry = RecordingListEntry(
+            recording: makeRecording(),
+            hasAudio: true,
+            transcript: transcript,
+            summary: nil,
+            transcriptFileURL: URL(fileURLWithPath: "/tmp/t.json")
+        )
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .confirmDelete(entries: [entry], selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("t"))
+        #expect(nextState.recordings == .list(entries: [entry], selectedIndex: 0))
+        #expect(effects == [.deleteTranscript(transcript), .loadRecordings])
+    }
+
+    @Test
+    func confirmDelete_b_withBoth_emitsBothDeletesThenLoadRecordings() {
+        let transcript = makeTranscript()
+        let recording = makeRecording()
+        let entry = RecordingListEntry(
+            recording: recording,
+            hasAudio: true,
+            transcript: transcript,
+            summary: nil,
+            transcriptFileURL: URL(fileURLWithPath: "/tmp/t.json")
+        )
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .confirmDelete(entries: [entry], selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("b"))
+        #expect(nextState.recordings == .list(entries: [entry], selectedIndex: 0))
+        #expect(effects == [.deleteAudio(recording), .deleteTranscript(transcript), .loadRecordings])
+    }
+
+    @Test
+    func confirmDelete_esc_cancelsWithNoEffects() {
+        let entry = RecordingListEntry(
+            recording: makeRecording(),
+            hasAudio: true,
+            transcript: makeTranscript(),
+            summary: nil,
+            transcriptFileURL: URL(fileURLWithPath: "/tmp/t.json")
+        )
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .confirmDelete(entries: [entry], selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.recordings == .list(entries: [entry], selectedIndex: 0))
+        #expect(effects.isEmpty)
+    }
+
+    // MARK: - Esc (global) from the two new confirm sub-states reverts to .list
+
+    @Test
+    func globalEsc_fromConfirmGenerateTranscript_revertsToList() {
+        let entries = makeEntries([makeRecording(title: "A")])
+        let state = TUIState(
+            focusedPane: .navigation,
+            selectedSection: 1,
+            recordings: .confirmGenerateTranscript(entries: entries, selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.recordings == .list(entries: entries, selectedIndex: 0))
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func globalEsc_fromConfirmDelete_revertsToList() {
+        let entries = makeEntries([makeRecording(title: "A")])
+        let state = TUIState(
+            focusedPane: .navigation,
+            selectedSection: 1,
+            recordings: .confirmDelete(entries: entries, selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.recordings == .list(entries: entries, selectedIndex: 0))
         #expect(effects.isEmpty)
     }
 

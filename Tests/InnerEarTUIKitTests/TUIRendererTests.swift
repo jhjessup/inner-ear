@@ -82,7 +82,7 @@ struct TUIRendererTests {
         let state = TUIState(
             focusedPane: .detail,
             selectedSection: 1,
-            recordings: .list(recordings: [], selectedIndex: 0)
+            recordings: .list(entries: [], selectedIndex: 0)
         )
         for h in [18, 22, 30, 50] {
             let lines = TUIRenderer.render(state: state, width: 80, height: h)
@@ -242,7 +242,7 @@ struct TUIRendererTests {
         let state = TUIState(
             focusedPane: .detail,
             selectedSection: 1,
-            recordings: .list(recordings: [], selectedIndex: 0)
+            recordings: .list(entries: [], selectedIndex: 0)
         )
         let lines = TUIRenderer.render(state: state, width: 80, height: 24)
         let joined = lines.joined(separator: "\n")
@@ -261,10 +261,19 @@ struct TUIRendererTests {
                 microphoneFileURL: URL(fileURLWithPath: "/tmp/test2.caf")
             )
         ]
+        let entries = recs.map { rec in
+            RecordingListEntry(
+                recording: rec,
+                hasAudio: true,
+                transcript: nil,
+                summary: nil,
+                transcriptFileURL: nil
+            )
+        }
         let state = TUIState(
             focusedPane: .detail,
             selectedSection: 1,
-            recordings: .list(recordings: recs, selectedIndex: 0)
+            recordings: .list(entries: entries, selectedIndex: 0)
         )
         let lines = TUIRenderer.render(state: state, width: 80, height: 24)
         let joined = lines.joined(separator: "\n")
@@ -296,6 +305,185 @@ struct TUIRendererTests {
         let lines = TUIRenderer.render(state: state, width: 80, height: 24)
         let joined = lines.joined(separator: "\n")
         #expect(joined.contains("Hello world, this is a test transcript"))
+    }
+
+    @Test
+    func recordings_viewingResults_rendersPerSegmentTimestampAndSpeaker_notFlatEcho() {
+        // "Rendered, not echoed": each segment must show its own MM:SS
+        // timestamp and speaker label, not just a flat concatenated blob.
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        // makeTranscript()'s single segment starts at time 0 with speaker "Speaker 1".
+        #expect(joined.contains("[00:00] Speaker 1:"))
+    }
+
+    @Test
+    func recordings_list_marker_reflectsAudioAndTranscriptPresence() {
+        let withBoth = RecordingListEntry(
+            recording: makeRecording(title: "Both"),
+            hasAudio: true,
+            transcript: makeTranscript(),
+            summary: nil,
+            transcriptFileURL: URL(fileURLWithPath: "/tmp/t.json")
+        )
+        let audioOnly = RecordingListEntry(
+            recording: Recording(
+                id: UUID(uuidString: "33333333-4444-5555-6666-777777777777")!,
+                title: "AudioOnly",
+                createdAt: Date(timeIntervalSince1970: 1_000_000),
+                duration: 10,
+                microphoneFileURL: URL(fileURLWithPath: "/tmp/audioonly.caf")
+            ),
+            hasAudio: true,
+            transcript: nil,
+            summary: nil,
+            transcriptFileURL: nil
+        )
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: [withBoth, audioOnly], selectedIndex: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("[AT] Both"))
+        #expect(joined.contains("[A-] AudioOnly"))
+    }
+
+    @Test
+    func recordings_list_attributeBar_showsCaptureTimeAndFilePaths() {
+        let recording = Recording(
+            id: UUID(),
+            title: "With Paths",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            duration: 30,
+            microphoneFileURL: URL(fileURLWithPath: "/tmp/mic-audio.caf")
+        )
+        let transcript = makeTranscript()
+        let entry = RecordingListEntry(
+            recording: recording,
+            hasAudio: true,
+            transcript: transcript,
+            summary: nil,
+            transcriptFileURL: URL(fileURLWithPath: "/tmp/transcript-file.json")
+        )
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: [entry], selectedIndex: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("Captured:"))
+        #expect(joined.contains("/tmp/mic-audio.caf"))
+        #expect(joined.contains("/tmp/transcript-file.json"))
+    }
+
+    @Test
+    func recordings_list_attributeBar_showsPlaceholdersWhenMissing() {
+        let entry = RecordingListEntry(
+            recording: Recording(
+                id: UUID(),
+                title: "Nothing",
+                createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+                duration: 5,
+                microphoneFileURL: URL(fileURLWithPath: "/tmp/gone.caf")
+            ),
+            hasAudio: false,
+            transcript: nil,
+            summary: nil,
+            transcriptFileURL: nil
+        )
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: [entry], selectedIndex: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("not present"))
+        #expect(joined.contains("not yet generated"))
+    }
+
+    @Test
+    func recordings_confirmGenerateTranscript_rendersPromptWithTitle() {
+        let entries = [
+            RecordingListEntry(
+                recording: makeRecording(title: "Needs Transcript"),
+                hasAudio: true,
+                transcript: nil,
+                summary: nil,
+                transcriptFileURL: nil
+            )
+        ]
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .confirmGenerateTranscript(entries: entries, selectedIndex: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("Needs Transcript"))
+        #expect(joined.contains("[y/n]"))
+    }
+
+    @Test
+    func recordings_confirmDelete_rendersPromptWithTitleAndOptions() {
+        let entries = [
+            RecordingListEntry(
+                recording: makeRecording(title: "Doomed"),
+                hasAudio: true,
+                transcript: makeTranscript(),
+                summary: nil,
+                transcriptFileURL: URL(fileURLWithPath: "/tmp/t.json")
+            )
+        ]
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .confirmDelete(entries: entries, selectedIndex: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("Doomed"))
+        #expect(joined.contains("[a] Audio only"))
+        #expect(joined.contains("[t] Transcript only"))
+        #expect(joined.contains("[b] Both"))
+    }
+
+    @Test
+    func footer_differsAcrossListConfirmGenerateAndConfirmDeleteStates() {
+        let entries = [
+            RecordingListEntry(
+                recording: makeRecording(),
+                hasAudio: true,
+                transcript: nil,
+                summary: nil,
+                transcriptFileURL: nil
+            )
+        ]
+        let listFooter = TUIRenderer.footerText(for: TUIState(
+            focusedPane: .detail, selectedSection: 1,
+            recordings: .list(entries: entries, selectedIndex: 0)
+        ))
+        let generateFooter = TUIRenderer.footerText(for: TUIState(
+            focusedPane: .detail, selectedSection: 1,
+            recordings: .confirmGenerateTranscript(entries: entries, selectedIndex: 0)
+        ))
+        let deleteFooter = TUIRenderer.footerText(for: TUIState(
+            focusedPane: .detail, selectedSection: 1,
+            recordings: .confirmDelete(entries: entries, selectedIndex: 0)
+        ))
+        #expect(listFooter.contains("[d] Delete"))
+        #expect(generateFooter.contains("Generate"))
+        #expect(deleteFooter.contains("Audio"))
+        #expect(listFooter != generateFooter)
+        #expect(generateFooter != deleteFooter)
     }
 
     // MARK: - Settings section

@@ -89,8 +89,8 @@ enum TUIRunLoop {
                             renderNow()
 
                         case .loadRecordings:
-                            let recordings = try storeBox.store.listRecordings()
-                            state.recordings = .list(recordings: recordings, selectedIndex: 0)
+                            let entries = buildRecordingListEntries(store: storeBox.store)
+                            state.recordings = .list(entries: entries, selectedIndex: 0)
                             renderNow()
 
                         case .runPipeline(let recording):
@@ -201,13 +201,36 @@ enum TUIRunLoop {
                             )
                             // Reload the Recordings list from the fresh
                             // store (its contents live under the new data
-                            // directory). If the list call throws for any
+                            // directory). If the lookup throws for any
                             // reason, fall back to an empty list rather
                             // than surfacing another error here — the
                             // user can always re-enter the pane to retry.
-                            let recordings = (try? storeBox.store.listRecordings()) ?? []
-                            state.recordings = .list(recordings: recordings, selectedIndex: 0)
+                            // Reuses the same entry-building helper as
+                            // `.loadRecordings` so the per-row audio /
+                            // transcript / summary / file-URL resolution
+                            // is identical to a fresh nav-Enter.
+                            let entries = buildRecordingListEntries(store: storeBox.store)
+                            state.recordings = .list(entries: entries, selectedIndex: 0)
                             renderNow()
+
+                        case .deleteAudio(let recording):
+                            // Swallow errors with `try?` — a delete failing
+                            // (e.g. file already gone) shouldn't surface a
+                            // modal and interrupt the flow, since
+                            // `.loadRecordings` runs right after (chained
+                            // by the controller) and will just reflect
+                            // whatever the real on-disk state ends up
+                            // being.
+                            try? storeBox.store.deleteAudioFiles(for: recording)
+                            cleanupOrphanedCatalogEntryIfNeeded(recording.id, store: storeBox.store)
+
+                        case .deleteTranscript(let transcript):
+                            // Same `try?` rationale as `.deleteAudio` — a
+                            // missing-on-disk transcript is not an error
+                            // case for the user, just a no-op that the
+                            // follow-up `.loadRecordings` will reflect.
+                            try? storeBox.store.deleteTranscript(transcript)
+                            cleanupOrphanedCatalogEntryIfNeeded(transcript.recordingID, store: storeBox.store)
 
                         case .quit:
                             rawMode.restore()
@@ -239,6 +262,51 @@ enum TUIRunLoop {
         case .envVar:          return .envVar
         case .configFile:      return .configFile
         case .defaultLocation: return .defaultLocation
+        }
+    }
+
+    /// Build the full `[RecordingListEntry]` array for the Recordings list
+    /// by resolving each recording's audio presence, transcript (by
+    /// `recordingID`), summary (by `transcriptID`), and the on-disk
+    /// transcript JSON URL — all in one pass over the store's contents.
+    /// Used by both `.loadRecordings` (initial nav-Enter into the
+    /// Recordings section) and the `.saveDataDirectory` success path
+    /// (which rebuilds the store with a new data directory and needs the
+    /// list re-resolved against the fresh contents).
+    ///
+    /// Failures are swallowed at the per-field level (e.g. a missing
+    /// transcripts directory yields `[]`, not a thrown error) so a
+    /// partially-populated store still renders something useful rather
+    /// than a hard error in the UI.
+    private static func buildRecordingListEntries(store: RecordingStore) -> [RecordingListEntry] {
+        let recordings = (try? store.listRecordings()) ?? []
+        let allTranscripts = (try? store.listTranscripts()) ?? []
+        let allSummaries = (try? store.listSummaries()) ?? []
+        return recordings.map { recording in
+            let hasAudio = FileManager.default.fileExists(atPath: recording.microphoneFileURL.path)
+            let transcript = allTranscripts.first { $0.recordingID == recording.id }
+            let summary = transcript.flatMap { t in allSummaries.first { $0.transcriptID == t.id } }
+            let transcriptURL = transcript.map { store.transcriptFileURL(for: $0) }
+            return RecordingListEntry(
+                recording: recording,
+                hasAudio: hasAudio,
+                transcript: transcript,
+                summary: summary,
+                transcriptFileURL: transcriptURL
+            )
+        }
+    }
+
+    /// After deleting a recording's audio or transcript, remove the
+    /// Recording catalog entry entirely if BOTH are now gone — otherwise a
+    /// fully-empty ghost entry (no audio, no transcript) would linger in
+    /// the list forever with nothing useful to show or do with it.
+    private static func cleanupOrphanedCatalogEntryIfNeeded(_ recordingID: UUID, store: RecordingStore) {
+        guard let recording = try? store.loadRecording(id: recordingID) else { return }
+        let hasAudio = FileManager.default.fileExists(atPath: recording.microphoneFileURL.path)
+        let hasTranscript = (try? store.listTranscripts())?.contains { $0.recordingID == recordingID } ?? false
+        if !hasAudio && !hasTranscript {
+            try? store.deleteRecordingCatalogEntry(recordingID)
         }
     }
 }

@@ -9,5 +9,7 @@ public enum TUIEffect: Equatable, Sendable {
     case exportResult(transcript: Transcript, summary: Summary?, format: ExportFormat)
     case loadConfigStatus
     case saveDataDirectory(String)
+    case deleteAudio(Recording)
+    case deleteTranscript(Transcript)
     case quit
 }

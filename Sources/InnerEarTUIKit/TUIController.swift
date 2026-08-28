@@ -76,8 +76,19 @@ public enum TUIController {
                 // effect — the list is reloaded on next nav Enter). .list
                 // stays as-is (don't clobber a populated list). .processing
                 // is a no-op so we don't corrupt state mid-pipeline.
-                if case .viewingResults = s.recordings {
-                    s.recordings = .list(recordings: [], selectedIndex: 0)
+                // .confirmGenerateTranscript and .confirmDelete revert to
+                // .list using the entries/selectedIndex already in hand
+                // (same data the per-section reducer would have used for
+                // 'n' or Esc) — preserves any in-progress browsing state.
+                switch s.recordings {
+                case .viewingResults:
+                    s.recordings = .list(entries: [], selectedIndex: 0)
+                case .confirmGenerateTranscript(let entries, let selectedIndex):
+                    s.recordings = .list(entries: entries, selectedIndex: selectedIndex)
+                case .confirmDelete(let entries, let selectedIndex):
+                    s.recordings = .list(entries: entries, selectedIndex: selectedIndex)
+                case .list, .processing:
+                    break
                 }
             case 2:
                 // Settings: editing -> discard the in-progress edit by
@@ -195,28 +206,112 @@ public enum TUIController {
     /// Section 1 (Recordings) — match on `state.recordings`.
     private static func reduceRecordings(state: TUIState, key: Character) -> (TUIState, [TUIEffect]) {
         switch state.recordings {
-        case .list(let recordings, let selectedIndex):
+        case .list(let entries, let selectedIndex):
             switch key {
             case "j":
                 var s = state
                 s.recordings = .list(
-                    recordings: recordings,
-                    selectedIndex: min(selectedIndex + 1, max(0, recordings.count - 1))
+                    entries: entries,
+                    selectedIndex: min(selectedIndex + 1, max(0, entries.count - 1))
                 )
                 return (s, [])
             case "k":
                 var s = state
                 s.recordings = .list(
-                    recordings: recordings,
+                    entries: entries,
                     selectedIndex: max(selectedIndex - 1, 0)
                 )
                 return (s, [])
             case "\r", "\n":
-                guard !recordings.isEmpty else { return (state, []) }
-                let chosen = recordings[selectedIndex]
+                guard !entries.isEmpty else { return (state, []) }
+                let entry = entries[selectedIndex]
                 var s = state
-                s.recordings = .processing(recording: chosen, statusLine: "Starting...")
-                return (s, [.runPipeline(chosen)])
+                if let transcript = entry.transcript {
+                    // Already transcribed — jump straight to the viewer,
+                    // no effect needed (transcript + summary are already
+                    // resolved into the entry, so this is a pure state
+                    // transition).
+                    s.recordings = .viewingResults(
+                        transcript: transcript,
+                        summary: entry.summary,
+                        scrollOffset: 0
+                    )
+                    return (s, [])
+                } else if entry.hasAudio {
+                    // Has audio but no transcript yet — confirm before
+                    // kicking off the (potentially long) pipeline.
+                    s.recordings = .confirmGenerateTranscript(
+                        entries: entries,
+                        selectedIndex: selectedIndex
+                    )
+                    return (s, [])
+                } else {
+                    // Neither audio nor transcript — a transient edge case
+                    // that shouldn't normally persist in the list. No-op.
+                    return (state, [])
+                }
+            case "d":
+                guard !entries.isEmpty else { return (state, []) }
+                var s = state
+                s.recordings = .confirmDelete(
+                    entries: entries,
+                    selectedIndex: selectedIndex
+                )
+                return (s, [])
+            default:
+                return (state, [])
+            }
+
+        case .confirmGenerateTranscript(let entries, let selectedIndex):
+            switch key {
+            case "y":
+                let recording = entries[selectedIndex].recording
+                var s = state
+                s.recordings = .processing(recording: recording, statusLine: "Starting...")
+                return (s, [.runPipeline(recording)])
+            case "n", "\u{1B}":
+                var s = state
+                s.recordings = .list(entries: entries, selectedIndex: selectedIndex)
+                return (s, [])
+            default:
+                return (state, [])
+            }
+
+        case .confirmDelete(let entries, let selectedIndex):
+            let entry = entries[selectedIndex]
+            switch key {
+            case "a":
+                var s = state
+                s.recordings = .list(entries: entries, selectedIndex: selectedIndex)
+                if entry.hasAudio {
+                    return (s, [.deleteAudio(entry.recording), .loadRecordings])
+                }
+                return (s, [])
+            case "t":
+                var s = state
+                s.recordings = .list(entries: entries, selectedIndex: selectedIndex)
+                if let transcript = entry.transcript {
+                    return (s, [.deleteTranscript(transcript), .loadRecordings])
+                }
+                return (s, [])
+            case "b":
+                var s = state
+                s.recordings = .list(entries: entries, selectedIndex: selectedIndex)
+                var effects: [TUIEffect] = []
+                if entry.hasAudio {
+                    effects.append(.deleteAudio(entry.recording))
+                }
+                if let transcript = entry.transcript {
+                    effects.append(.deleteTranscript(transcript))
+                }
+                if !effects.isEmpty {
+                    effects.append(.loadRecordings)
+                }
+                return (s, effects)
+            case "\u{1B}":
+                var s = state
+                s.recordings = .list(entries: entries, selectedIndex: selectedIndex)
+                return (s, [])
             default:
                 return (state, [])
             }
