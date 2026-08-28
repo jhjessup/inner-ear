@@ -31,12 +31,27 @@ final class RawTerminalMode {
         guard tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0 else {
             throw TerminalError.tcsetattrFailed(errno: errno)
         }
+
+        // Switch to the ANSI alternate screen buffer. Without this, a full
+        // clear-and-redraw cycle fights with the terminal emulator's own
+        // resize behavior: shrinking the window commonly scrolls existing
+        // on-screen content into scrollback to preserve it, which visually
+        // pushes the next redraw toward the bottom of the window instead of
+        // staying top-aligned. The alternate buffer has no scrollback to
+        // preserve, so ESC[2J + cursor-home always produces a clean
+        // top-aligned frame regardless of resize timing — the same
+        // mechanism vim/less/htop/tmux use for exactly this reason.
+        rawTerminalWrite("\u{1B}[?1049h")
     }
 
     /// Restore the original terminal settings. Safe to call multiple times.
     func restore() {
         guard !isRestored else { return }
         _ = tcsetattr(STDIN_FILENO, TCSANOW, &originalTermios)
+        // Leave the alternate screen buffer, restoring the user's original
+        // terminal content and scrollback exactly as it was before the TUI
+        // started.
+        rawTerminalWrite("\u{1B}[?1049l")
         isRestored = true
     }
 
@@ -75,8 +90,17 @@ func readKeyNonBlocking() -> Character? {
     return Character(UnicodeScalar(buffer[0]))
 }
 
+/// Write raw bytes directly to stdout (fd 1) via `write(2)`, bypassing
+/// Swift's buffered `print`/stdout entirely (which would cause jerky or
+/// partial-frame redraws in a raw-mode terminal loop).
+func rawTerminalWrite(_ s: String) {
+    let bytes = Array(s.utf8)
+    bytes.withUnsafeBytes { buffer in
+        _ = write(STDOUT_FILENO, buffer.baseAddress, buffer.count)
+    }
+}
+
 /// Write an array of lines to the terminal, clearing the screen first.
-/// Uses raw `write(2)` on stdout (fd 1) to avoid Swift's stdout buffering.
 /// Lines are terminated with `\r\n` because the terminal is in raw mode.
 func writeToTerminal(_ lines: [String]) {
     // ANSI escape: clear screen + move cursor home
@@ -85,10 +109,7 @@ func writeToTerminal(_ lines: [String]) {
         output += line
         output += "\r\n"
     }
-    let bytes = Array(output.utf8)
-    bytes.withUnsafeBytes { buffer in
-        _ = write(STDOUT_FILENO, buffer.baseAddress, buffer.count)
-    }
+    rawTerminalWrite(output)
 }
 
 /// Install signal handlers for SIGINT and SIGTERM that call `restoreAction`
