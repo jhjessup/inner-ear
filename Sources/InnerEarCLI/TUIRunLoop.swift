@@ -45,6 +45,19 @@ enum TUIRunLoop {
 
         var state = TUIState()
 
+        // Eagerly load the Recordings list once at startup, even though
+        // the Recordings section isn't focused yet. The detail pane always
+        // previews whichever section is currently highlighted in the nav
+        // pane — including while just moving the nav selection with j/k,
+        // before Enter is ever pressed — so without this, browsing over
+        // to "Recordings" shows a stale, empty `.list(entries: [], ...)`
+        // ("No recordings yet.") right up until the user actually presses
+        // Enter and `.loadRecordings` fires. `.loadRecordings` itself is
+        // still triggered on every nav Enter into this section, so this is
+        // purely about the pane's PREVIEW being accurate from frame one,
+        // not a substitute for that refresh.
+        state.recordings = .list(entries: buildRecordingListEntries(store: storeBox.store), selectedIndex: 0)
+
         // Renders `state` immediately, using a freshly-queried terminal size.
         // Effects like `.runPipeline` set `state` multiple times in sequence
         // (Transcribing... -> Diarizing... -> Summarizing...) around blocking
