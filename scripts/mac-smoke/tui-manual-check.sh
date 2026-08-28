@@ -64,6 +64,14 @@ non-interactive input.
      "Diarizing..." -> "Summarizing..." that you can actually see
      changing in real time (not just the final state at the end), and
      then the Viewing Results screen with your transcript text.
+   - Confirm a progress bar ("[████░░░░░░...]") and a "Step N of 3" line
+     appear alongside each status update, and that the bar visibly fills
+     further at each of the 3 steps (Transcribing = 1/3 filled,
+     Diarizing = 2/3, Summarizing = full). This bar does NOT animate
+     smoothly WITHIN a step — the run loop blocks on each phase's real
+     work with no background redraw — so a "frozen" bar for the (up to
+     tens of seconds) duration of a single step is expected and correct,
+     not a bug; only the jump between steps should be visible.
 
 6. Scroll and export results:
    - Confirm each line of the transcript is RENDERED, not echoed: every

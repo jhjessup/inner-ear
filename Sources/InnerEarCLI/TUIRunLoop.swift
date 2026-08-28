@@ -108,7 +108,7 @@ enum TUIRunLoop {
 
                         case .runPipeline(let recording):
                             // Transcribe
-                            state.recordings = .processing(recording: recording, statusLine: "Transcribing...")
+                            state.recordings = .processing(recording: recording, statusLine: "Transcribing...", stepIndex: 1)
                             renderNow()
                             let transcript = try await transcription.transcribe(
                                 recording: recording,
@@ -117,7 +117,7 @@ enum TUIRunLoop {
                             )
 
                             // Diarize
-                            state.recordings = .processing(recording: recording, statusLine: "Diarizing...")
+                            state.recordings = .processing(recording: recording, statusLine: "Diarizing...", stepIndex: 2)
                             renderNow()
                             let diarizedTranscript = try await diarization.diarize(
                                 transcript: transcript,
@@ -125,7 +125,7 @@ enum TUIRunLoop {
                             )
 
                             // Summarize
-                            state.recordings = .processing(recording: recording, statusLine: "Summarizing...")
+                            state.recordings = .processing(recording: recording, statusLine: "Summarizing...", stepIndex: 3)
                             renderNow()
                             let summary = try await summarization.summarize(transcript: diarizedTranscript)
 

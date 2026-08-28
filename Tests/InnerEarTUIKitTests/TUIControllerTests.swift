@@ -197,20 +197,26 @@ struct TUIControllerTests {
     }
 
     @Test
-    func esc_whileViewingResults_resetsToEmptyList_noLoadEffect() {
+    func esc_whileViewingResults_resetsToListAndReloads() {
+        // Regression test: Esc from results used to reset to an empty list
+        // with NO reload effect, leaving the pane stuck on "No recordings
+        // yet." until the user left and re-entered the section — reported
+        // as a data-loss-looking bug right after recording+processing
+        // something new. Esc must now emit .loadRecordings so the list is
+        // genuinely fresh the moment the user backs out of results.
         let state = TUIState(
             focusedPane: .navigation,
             selectedSection: 1,
             recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 3)
         )
         let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
-        if case .list(let recs, let idx) = nextState.recordings {
-            #expect(recs.isEmpty)
+        if case .list(let entries, let idx) = nextState.recordings {
+            #expect(entries.isEmpty)
             #expect(idx == 0)
         } else {
             #expect(Bool(false), "Expected .list after Esc")
         }
-        #expect(effects.isEmpty, "Esc should NOT emit .loadRecordings (plan: pure local reset)")
+        #expect(effects == [.loadRecordings])
     }
 
     @Test
@@ -232,10 +238,10 @@ struct TUIControllerTests {
         let state = TUIState(
             focusedPane: .navigation,
             selectedSection: 1,
-            recordings: .processing(recording: makeRecording(), statusLine: "Transcribing...")
+            recordings: .processing(recording: makeRecording(), statusLine: "Transcribing...", stepIndex: 1)
         )
         let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
-        if case .processing(_, let statusLine) = nextState.recordings {
+        if case .processing(_, let statusLine, _) = nextState.recordings {
             #expect(statusLine == "Transcribing...")
         } else {
             #expect(Bool(false), "Expected .processing preserved")
@@ -439,9 +445,10 @@ struct TUIControllerTests {
         // The specific assertion the design review called out: all four
         // must be true in the same reduce() call.
         #expect(nextState.selectedSection == 1)
-        if case .processing(let rec, let statusLine) = nextState.recordings {
+        if case .processing(let rec, let statusLine, let stepIndex) = nextState.recordings {
             #expect(rec.id == recording.id)
             #expect(statusLine == "Starting...")
+            #expect(stepIndex == 0)
         } else {
             #expect(Bool(false), "Expected .processing on recordings")
         }
@@ -640,9 +647,10 @@ struct TUIControllerTests {
             recordings: .confirmGenerateTranscript(entries: entries, selectedIndex: 1)
         )
         let (nextState, effects) = TUIController.reduce(state, .key("y"))
-        if case .processing(let rec, let statusLine) = nextState.recordings {
+        if case .processing(let rec, let statusLine, let stepIndex) = nextState.recordings {
             #expect(rec.id == recordings[1].id)
             #expect(statusLine == "Starting...")
+            #expect(stepIndex == 0)
         } else {
             #expect(Bool(false), "Expected .processing")
         }

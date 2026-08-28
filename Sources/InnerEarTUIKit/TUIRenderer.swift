@@ -22,6 +22,11 @@ public enum TUIRenderer {
     static let minWidth: Int = 60
     static let minHeight: Int = 18
 
+    /// The pipeline always has exactly 3 phases (transcribe, diarize,
+    /// summarize) — kept as a constant here rather than stored per-state,
+    /// since it never varies.
+    static let processingTotalSteps: Int = 3
+
     /// Render the current state to a line array bounded by `width` × `height`.
     ///
     /// - Parameters:
@@ -208,10 +213,12 @@ public enum TUIRenderer {
         case .confirmDelete(let entries, let selectedIndex):
             return renderConfirmDelete(entries: entries, selectedIndex: selectedIndex, width: width)
 
-        case .processing(let recording, let statusLine):
+        case .processing(let recording, let statusLine, let stepIndex):
             return [
                 "Processing \(recording.title)...",
-                statusLine
+                statusLine,
+                renderProgressBar(stepIndex: stepIndex, width: width),
+                "Step \(min(stepIndex, processingTotalSteps)) of \(processingTotalSteps)"
             ]
 
         case .viewingResults(let transcript, let summary, let scrollOffset):
@@ -393,6 +400,27 @@ public enum TUIRenderer {
         let minutes = Int(time) / 60
         let seconds = Int(time) % 60
         return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    /// Render a discrete (not animated) progress bar for the processing
+    /// pipeline: `stepIndex` filled out of `processingTotalSteps` total.
+    ///
+    /// This is deliberately NOT a smoothly-animating bar. The run loop
+    /// blocks synchronously on each pipeline phase's `await` (no concurrent
+    /// Tasks, by design — see TUIRunLoop's doc comment on why) and only
+    /// calls `render` again once a phase completes, so anything meant to
+    /// animate *during* a phase would need a background redraw Task and
+    /// would sit visibly frozen the instant that Task wasn't actually
+    /// running, which is worse than no animation at all. What CAN be shown
+    /// honestly is which of the 3 known phases has started — real,
+    /// non-fabricated progress — updated at each of the render calls that
+    /// already happen when a phase begins.
+    private static func renderProgressBar(stepIndex: Int, width: Int) -> String {
+        let clampedStep = min(max(stepIndex, 0), processingTotalSteps)
+        let barWidth = max(10, min(40, width - 2))
+        let filled = Int((Double(clampedStep) / Double(processingTotalSteps) * Double(barWidth)).rounded())
+        let bar = String(repeating: "█", count: filled) + String(repeating: "░", count: barWidth - filled)
+        return "[\(bar)]"
     }
 
     /// Section 2 (Settings) detail lines.

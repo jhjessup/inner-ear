@@ -287,12 +287,51 @@ struct TUIRendererTests {
         let state = TUIState(
             focusedPane: .detail,
             selectedSection: 1,
-            recordings: .processing(recording: makeRecording(title: "Demo"), statusLine: "Diarizing...")
+            recordings: .processing(recording: makeRecording(title: "Demo"), statusLine: "Diarizing...", stepIndex: 2)
         )
         let lines = TUIRenderer.render(state: state, width: 80, height: 24)
         let joined = lines.joined(separator: "\n")
         #expect(joined.contains("Demo"))
         #expect(joined.contains("Diarizing"))
+    }
+
+    @Test
+    func recordings_processing_rendersProgressBarAndStepCount() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .processing(recording: makeRecording(), statusLine: "Diarizing...", stepIndex: 2)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("Step 2 of 3"))
+        #expect(joined.contains("█"))
+        #expect(joined.contains("["))
+        #expect(joined.contains("]"))
+    }
+
+    @Test
+    func recordings_processing_progressBarFillGrowsWithStepIndex() {
+        func filledCount(forStep step: Int) -> Int {
+            let state = TUIState(
+                focusedPane: .detail,
+                selectedSection: 1,
+                recordings: .processing(recording: makeRecording(), statusLine: "x", stepIndex: step)
+            )
+            let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+            // Rendered lines are full frame rows wrapped in box-drawing
+            // border characters ("│ ... │"), not raw content — so match on
+            // "[" appearing anywhere in the row, not as a line prefix.
+            let barLine = lines.first { $0.contains("[") && ($0.contains("█") || $0.contains("░")) }
+            return barLine?.filter { $0 == "█" }.count ?? -1
+        }
+        let step0 = filledCount(forStep: 0)
+        let step1 = filledCount(forStep: 1)
+        let step2 = filledCount(forStep: 2)
+        let step3 = filledCount(forStep: 3)
+        #expect(step0 == 0)
+        #expect(step1 < step2)
+        #expect(step2 < step3)
     }
 
     @Test

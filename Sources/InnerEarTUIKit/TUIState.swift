@@ -39,7 +39,11 @@ public enum RecordingsSectionState: Equatable, Sendable {
     case list(entries: [RecordingListEntry], selectedIndex: Int)
     case confirmGenerateTranscript(entries: [RecordingListEntry], selectedIndex: Int)
     case confirmDelete(entries: [RecordingListEntry], selectedIndex: Int)
-    case processing(recording: Recording, statusLine: String)
+    /// `stepIndex` is 0 before the pipeline's first phase begins ("Starting..."),
+    /// then 1/2/3 as Transcribing/Diarizing/Summarizing begin — drives the
+    /// progress bar in `TUIRenderer`. There are always exactly 3 phases
+    /// (transcribe → diarize → summarize), so the total isn't stored here.
+    case processing(recording: Recording, statusLine: String, stepIndex: Int)
     case viewingResults(transcript: Transcript, summary: Summary?, scrollOffset: Int)
 }
 

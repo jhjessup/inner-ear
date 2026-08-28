@@ -72,17 +72,26 @@ public enum TUIController {
                 if case .idle = s.record { /* no-op */ }
                 else { s.record = .idle }
             case 1:
-                // Recordings: viewingResults -> empty list (no .loadRecordings
-                // effect — the list is reloaded on next nav Enter). .list
-                // stays as-is (don't clobber a populated list). .processing
-                // is a no-op so we don't corrupt state mid-pipeline.
-                // .confirmGenerateTranscript and .confirmDelete revert to
-                // .list using the entries/selectedIndex already in hand
-                // (same data the per-section reducer would have used for
-                // 'n' or Esc) — preserves any in-progress browsing state.
+                // Recordings: .list stays as-is (don't clobber a populated
+                // list). .processing is a no-op so we don't corrupt state
+                // mid-pipeline. .confirmGenerateTranscript and .confirmDelete
+                // revert to .list using the entries/selectedIndex already in
+                // hand (same data the per-section reducer would have used
+                // for 'n' or Esc) — preserves any in-progress browsing state.
+                //
+                // .viewingResults previously reset to an EMPTY .list with no
+                // reload effect, on the theory that the next nav Enter would
+                // refresh it — but Esc from results is exactly the path a
+                // user takes right after recording+processing something new,
+                // and leaving them at a blank "No recordings yet." until
+                // they leave and re-enter the section reads as data loss,
+                // not a lazy-reload optimization. Emit `.loadRecordings` so
+                // the list is genuinely fresh (and includes what was just
+                // processed) the moment Esc is pressed, not on next entry.
                 switch s.recordings {
                 case .viewingResults:
                     s.recordings = .list(entries: [], selectedIndex: 0)
+                    return (s, [.loadRecordings])
                 case .confirmGenerateTranscript(let entries, let selectedIndex):
                     s.recordings = .list(entries: entries, selectedIndex: selectedIndex)
                 case .confirmDelete(let entries, let selectedIndex):
@@ -193,7 +202,7 @@ public enum TUIController {
             if key == "\r" || key == "\n" {
                 var s = state
                 s.selectedSection = 1
-                s.recordings = .processing(recording: recording, statusLine: "Starting...")
+                s.recordings = .processing(recording: recording, statusLine: "Starting...", stepIndex: 0)
                 s.record = .idle
                 // focusedPane stays .detail — the user is still looking at
                 // a detail pane, just section 1 instead of 0.
@@ -267,7 +276,7 @@ public enum TUIController {
             case "y":
                 let recording = entries[selectedIndex].recording
                 var s = state
-                s.recordings = .processing(recording: recording, statusLine: "Starting...")
+                s.recordings = .processing(recording: recording, statusLine: "Starting...", stepIndex: 0)
                 return (s, [.runPipeline(recording)])
             case "n", "\u{1B}":
                 var s = state
