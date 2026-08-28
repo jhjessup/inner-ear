@@ -129,19 +129,14 @@ struct ViewportScrollingTests {
             width: width,
             height: height
         )
-        #expect(lines.count == height)
-        // First 3 lines should be content, 4th should be footer
+        // The renderer never pads short content up to `height` — it only
+        // ever truncates when there's too much. With 3 content lines, the
+        // output is exactly those 3 lines plus a 1-line footer, not 10.
+        #expect(lines.count == 4)
         #expect(lines[0] == String(repeating: "X", count: width))
         #expect(lines[1] == String(repeating: "X", count: width))
         #expect(lines[2] == String(repeating: "X", count: width))
         #expect(lines[3].contains("[j/k] Scroll"))
-        // Lines 4-9 should be empty (padding) or not exist since we cap at height
-        // Actually the renderer fills exactly `height` lines, so the rest are empty strings
-        // before the footer... wait, let me check the renderer logic.
-        // The renderer takes a window of `visibleHeight` lines from `allLines`,
-        // then adds footer if there's room. If content is shorter than visibleHeight,
-        // the window is just the content, then footer goes on next line.
-        // So lines[3] is footer, lines[4..<9] would not exist since we only have 10 lines total.
     }
 
     @Test
