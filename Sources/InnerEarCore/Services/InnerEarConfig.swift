@@ -87,4 +87,49 @@ public enum InnerEarConfigResolver {
     private static func expandTilde(_ path: String) -> String {
         (path as NSString).expandingTildeInPath
     }
+
+    /// Like `resolveDataDirectory`, but also reports which precedence tier
+    /// won, so UI can explain *why* the current path is what it is.
+    public static func resolveDataDirectoryWithSource(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default
+    ) -> (url: URL, source: DataDirectorySourceInfo) {
+        if let envPath = environment["INNEREAR_DATA_DIR"], !envPath.isEmpty {
+            return (URL(fileURLWithPath: expandTilde(envPath)), .envVar)
+        }
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let defaultBase = appSupport.appendingPathComponent("InnerEar", isDirectory: true)
+        let configURL = defaultBase.appendingPathComponent("config.json", isDirectory: false)
+        if fileManager.fileExists(atPath: configURL.path),
+           let data = try? Data(contentsOf: configURL),
+           let config = try? JSONDecoder().decode(InnerEarConfig.self, from: data),
+           let configured = config.recordingsDirectory,
+           !configured.isEmpty {
+            return (URL(fileURLWithPath: expandTilde(configured)), .configFile)
+        }
+        return (defaultBase, .defaultLocation)
+    }
+
+    /// Write `recordingsDirectory` to the fixed default config.json location
+    /// (creating the default InnerEar/ directory first if needed). Passing
+    /// `nil` or an empty string clears the override (falls back to default).
+    public static func writeRecordingsDirectory(
+        _ path: String?,
+        fileManager: FileManager = .default
+    ) throws {
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let defaultBase = appSupport.appendingPathComponent("InnerEar", isDirectory: true)
+        try fileManager.createDirectory(at: defaultBase, withIntermediateDirectories: true)
+        let configURL = defaultBase.appendingPathComponent("config.json", isDirectory: false)
+        let normalized = (path?.isEmpty ?? true) ? nil : path
+        let config = InnerEarConfig(recordingsDirectory: normalized)
+        let data = try JSONEncoder().encode(config)
+        try data.write(to: configURL, options: .atomic)
+    }
+
+    /// Plain enum mirroring `DataDirectorySource` from InnerEarTUIKit, kept
+    /// here (in InnerEarCore) since this file must not depend on
+    /// InnerEarTUIKit (dependency direction is TUIKit -> Core, never the
+    /// reverse). The TUI layer maps this 1:1 to its own `DataDirectorySource`.
+    public enum DataDirectorySourceInfo: Equatable, Sendable { case envVar, configFile, defaultLocation }
 }

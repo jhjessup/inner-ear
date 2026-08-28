@@ -1,41 +1,54 @@
 import Foundation
 import InnerEarCore
 
-/// The complete state of the TUI dashboard. All cases carry only value types
-/// (Recording, Transcript, Summary are Sendable/Equatable/Hashable per their
-/// model definitions), making this enum itself Equatable and Sendable.
-public enum TUIState: Equatable, Sendable {
-    /// Initial landing screen — shows the main menu options.
-    case mainMenu
+public struct TUIState: Equatable, Sendable {
+    public var focusedPane: Pane
+    public var selectedSection: Int
+    public var record: RecordSectionState
+    public var recordings: RecordingsSectionState
+    public var settings: SettingsSectionState
+    public var modal: Modal?
 
-    /// Prompt asking whether to include system audio in the new recording.
-    case recordPrompt
-
-    /// An active recording session. `startedAt` is the wall-clock time when
-    /// capture began; `captureSystemAudio` records the user's choice from
-    /// `recordPrompt` so the renderer can display it.
-    case recording(startedAt: Date, captureSystemAudio: Bool)
-
-    /// The recording has been stopped and saved to disk. The `Recording`
-    /// value contains the real persisted metadata (UUID, duration, file
-    /// URLs, etc.) which the run loop obtained from `stopCapture()` +
-    /// `store.save()`.
-    case recordingSaved(Recording)
-
-    /// Browsing the list of saved recordings. `selectedIndex` is the
-    /// zero-based index of the currently highlighted row.
-    case browsing(recordings: [Recording], selectedIndex: Int)
-
-    /// The full pipeline (transcribe → diarize → summarize) is running for
-    /// `recording`. `statusLine` is a human-readable description of the
-    /// current step (e.g. "Transcribing…", "Diarizing…", "Summarizing…").
-    case processing(recording: Recording, statusLine: String)
-
-    /// Pipeline completed. Shows the transcript (and optional summary) in a
-    /// scrollable viewport. `scrollOffset` is the zero-based line index of
-    /// the first visible line in the rendered text block.
-    case viewingResults(transcript: Transcript, summary: Summary?, scrollOffset: Int)
-
-    /// An error occurred. `message` is a user-facing description.
-    case errorMessage(String)
+    public init(
+        focusedPane: Pane = .navigation,
+        selectedSection: Int = 0,
+        record: RecordSectionState = .idle,
+        recordings: RecordingsSectionState = .list(recordings: [], selectedIndex: 0),
+        settings: SettingsSectionState = .viewing(resolvedPath: "", source: .defaultLocation),
+        modal: Modal? = nil
+    ) {
+        self.focusedPane = focusedPane
+        self.selectedSection = selectedSection
+        self.record = record
+        self.recordings = recordings
+        self.settings = settings
+        self.modal = modal
+    }
 }
+
+public enum Pane: Equatable, Sendable { case navigation, detail }
+
+public enum RecordSectionState: Equatable, Sendable {
+    case idle
+    case prompting
+    case recording(startedAt: Date, captureSystemAudio: Bool)
+    case saved(Recording)
+}
+
+public enum RecordingsSectionState: Equatable, Sendable {
+    case list(recordings: [Recording], selectedIndex: Int)
+    case processing(recording: Recording, statusLine: String)
+    case viewingResults(transcript: Transcript, summary: Summary?, scrollOffset: Int)
+}
+
+public enum SettingsSectionState: Equatable, Sendable {
+    case viewing(resolvedPath: String, source: DataDirectorySource)
+    case editing(currentInput: String)
+}
+
+public enum DataDirectorySource: Equatable, Sendable { case envVar, configFile, defaultLocation }
+
+public enum Modal: Equatable, Sendable { case error(String) }
+
+/// Human-readable names for the 3 nav-pane sections, in order (index 0, 1, 2).
+public let tuiSectionNames = ["Record", "Recordings", "Settings"]

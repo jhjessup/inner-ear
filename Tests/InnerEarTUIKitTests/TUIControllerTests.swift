@@ -50,274 +50,630 @@ struct TUIControllerTests {
         )
     }
 
-    // MARK: - Main Menu Tests
+    // MARK: - Tick is always a no-op
 
     @Test
-    func mainMenu_key1_transitionsToRecordPrompt() {
-        let (nextState, effects) = TUIController.reduce(.mainMenu, .key("1"))
-        #expect(nextState == .recordPrompt)
+    func tick_alwaysReturnsStateUnchanged_noEffects() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 5)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .tick(Date()))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    // MARK: - Tab toggles focused pane (both directions)
+
+    @Test
+    func tab_navigationToDetail() {
+        let state = TUIState(focusedPane: .navigation, selectedSection: 0)
+        let (nextState, effects) = TUIController.reduce(state, .key("\t"))
+        #expect(nextState.focusedPane == .detail)
         #expect(effects.isEmpty)
     }
 
     @Test
-    func mainMenu_keyQ_emitsQuitEffect() {
-        let (nextState, effects) = TUIController.reduce(.mainMenu, .key("q"))
-        #expect(nextState == .mainMenu)
-        #expect(effects == [.quit])
+    func tab_detailToNavigation() {
+        let state = TUIState(focusedPane: .detail, selectedSection: 1)
+        let (nextState, effects) = TUIController.reduce(state, .key("\t"))
+        #expect(nextState.focusedPane == .navigation)
+        #expect(effects.isEmpty)
+    }
+
+    // MARK: - Nav-pane j/k clamping
+
+    @Test
+    func navKey_j_incrementsSelectedSection() {
+        let state = TUIState(focusedPane: .navigation, selectedSection: 0)
+        let (nextState, _) = TUIController.reduce(state, .key("j"))
+        #expect(nextState.selectedSection == 1)
     }
 
     @Test
-    func mainMenu_key2_emitsLoadRecordingsEffect_staysOnMainMenu() {
-        let (nextState, effects) = TUIController.reduce(.mainMenu, .key("2"))
-        #expect(nextState == .mainMenu)
+    func navKey_k_decrementsSelectedSection() {
+        let state = TUIState(focusedPane: .navigation, selectedSection: 2)
+        let (nextState, _) = TUIController.reduce(state, .key("k"))
+        #expect(nextState.selectedSection == 1)
+    }
+
+    @Test
+    func navKey_j_clampsAtTwo() {
+        let state = TUIState(focusedPane: .navigation, selectedSection: 2)
+        let (nextState, _) = TUIController.reduce(state, .key("j"))
+        #expect(nextState.selectedSection == 2)
+    }
+
+    @Test
+    func navKey_k_clampsAtZero() {
+        let state = TUIState(focusedPane: .navigation, selectedSection: 0)
+        let (nextState, _) = TUIController.reduce(state, .key("k"))
+        #expect(nextState.selectedSection == 0)
+    }
+
+    // MARK: - Nav Enter into each section
+
+    @Test
+    func navEnter_section0_noEffects_focusesDetail() {
+        let state = TUIState(focusedPane: .navigation, selectedSection: 0)
+        let (nextState, effects) = TUIController.reduce(state, .key("\r"))
+        #expect(nextState.focusedPane == .detail)
+        #expect(nextState.selectedSection == 0)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func navEnter_section1_emitsLoadRecordings_focusesDetail() {
+        let state = TUIState(focusedPane: .navigation, selectedSection: 1)
+        let (nextState, effects) = TUIController.reduce(state, .key("\r"))
+        #expect(nextState.focusedPane == .detail)
+        #expect(nextState.selectedSection == 1)
         #expect(effects == [.loadRecordings])
     }
 
-    // MARK: - Record Prompt Tests
-
     @Test
-    func recordPrompt_keyY_transitionsToRecording_withStartRecordingTrueEffect() {
-        let (nextState, effects) = TUIController.reduce(.recordPrompt, .key("y"))
-        if case .recording(_, let captureSystemAudio) = nextState {
-            #expect(captureSystemAudio == true)
-        } else {
-            #expect(Bool(false), "Expected .recording state")
-        }
-        #expect(effects == [.startRecording(captureSystemAudio: true)])
+    func navEnter_section2_emitsLoadConfigStatus_focusesDetail() {
+        let state = TUIState(focusedPane: .navigation, selectedSection: 2)
+        let (nextState, effects) = TUIController.reduce(state, .key("\r"))
+        #expect(nextState.focusedPane == .detail)
+        #expect(nextState.selectedSection == 2)
+        #expect(effects == [.loadConfigStatus])
     }
 
-    @Test
-    func recordPrompt_keyN_transitionsToRecording_withStartRecordingFalseEffect() {
-        let (nextState, effects) = TUIController.reduce(.recordPrompt, .key("n"))
-        if case .recording(_, let captureSystemAudio) = nextState {
-            #expect(captureSystemAudio == false)
-        } else {
-            #expect(Bool(false), "Expected .recording state")
-        }
-        #expect(effects == [.startRecording(captureSystemAudio: false)])
-    }
+    // MARK: - Nav q emits .quit
 
     @Test
-    func recordPrompt_keyB_returnsToMainMenu() {
-        let (nextState, effects) = TUIController.reduce(.recordPrompt, .key("b"))
-        #expect(nextState == .mainMenu)
+    func navKey_q_emitsQuit() {
+        let state = TUIState(focusedPane: .navigation, selectedSection: 0)
+        let (nextState, effects) = TUIController.reduce(state, .key("q"))
+        #expect(nextState == state)
+        #expect(effects == [.quit])
+    }
+
+    // MARK: - Esc from nav-focused resets each section's sub-state
+
+    @Test
+    func esc_whileRecordPrompting_resetsToIdle() {
+        let state = TUIState(focusedPane: .navigation, selectedSection: 0, record: .prompting)
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.focusedPane == .navigation)
+        #expect(nextState.record == .idle)
         #expect(effects.isEmpty)
     }
 
-    // MARK: - Recording Tests
+    @Test
+    func esc_whileRecordSaved_resetsToIdle() {
+        let state = TUIState(focusedPane: .navigation, selectedSection: 0, record: .saved(makeRecording()))
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.record == .idle)
+        #expect(effects.isEmpty)
+    }
 
     @Test
-    func recording_keyS_emitsStopRecordingEffect_stateUnchanged() {
-        let state = TUIState.recording(startedAt: Date(), captureSystemAudio: true)
+    func esc_whileRecordIdle_isNoOp() {
+        let state = TUIState(focusedPane: .navigation, selectedSection: 0, record: .idle)
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.record == .idle)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func esc_whileViewingResults_resetsToEmptyList_noLoadEffect() {
+        let state = TUIState(
+            focusedPane: .navigation,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 3)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        if case .list(let recs, let idx) = nextState.recordings {
+            #expect(recs.isEmpty)
+            #expect(idx == 0)
+        } else {
+            #expect(Bool(false), "Expected .list after Esc")
+        }
+        #expect(effects.isEmpty, "Esc should NOT emit .loadRecordings (plan: pure local reset)")
+    }
+
+    @Test
+    func esc_whileList_keepsList_noEffects() {
+        let recordings = [makeRecording(title: "A"), makeRecording(title: "B")]
+        let state = TUIState(
+            focusedPane: .navigation,
+            selectedSection: 1,
+            recordings: .list(recordings: recordings, selectedIndex: 1)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.recordings == .list(recordings: recordings, selectedIndex: 1))
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func esc_whileProcessing_isNoOp() {
+        let state = TUIState(
+            focusedPane: .navigation,
+            selectedSection: 1,
+            recordings: .processing(recording: makeRecording(), statusLine: "Transcribing...")
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        if case .processing(_, let statusLine) = nextState.recordings {
+            #expect(statusLine == "Transcribing...")
+        } else {
+            #expect(Bool(false), "Expected .processing preserved")
+        }
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func esc_whileSettingsEditing_emitsLoadConfigStatus_resetsToPlaceholder() {
+        let state = TUIState(
+            focusedPane: .navigation,
+            selectedSection: 2,
+            settings: .editing(currentInput: "/tmp/newpath")
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        if case .viewing(let resolvedPath, let source) = nextState.settings {
+            #expect(resolvedPath == "")
+            #expect(source == .defaultLocation)
+        } else {
+            #expect(Bool(false), "Expected .viewing placeholder after Esc")
+        }
+        #expect(effects == [.loadConfigStatus])
+    }
+
+    @Test
+    func esc_whileSettingsViewing_isNoOp() {
+        let state = TUIState(
+            focusedPane: .navigation,
+            selectedSection: 2,
+            settings: .viewing(resolvedPath: "/data", source: .configFile)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.settings == state.settings)
+        #expect(effects.isEmpty)
+    }
+
+    // MARK: - Modal: swallows all but Enter/Esc
+
+    @Test
+    func modal_keyEnter_clearsModal() {
+        let state = TUIState(modal: .error("disk full"))
+        let (nextState, effects) = TUIController.reduce(state, .key("\r"))
+        #expect(nextState.modal == nil)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func modal_keyNewline_clearsModal() {
+        let state = TUIState(modal: .error("disk full"))
+        let (nextState, _) = TUIController.reduce(state, .key("\n"))
+        #expect(nextState.modal == nil)
+    }
+
+    @Test
+    func modal_keyEsc_clearsModal() {
+        let state = TUIState(modal: .error("disk full"))
+        let (nextState, _) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.modal == nil)
+    }
+
+    @Test
+    func modal_otherKey_isSwallowed() {
+        let state = TUIState(modal: .error("disk full"), focusedPane: .navigation, selectedSection: 0)
+        let (nextState, effects) = TUIController.reduce(state, .key("q"))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func modal_tab_isSwallowed() {
+        let state = TUIState(modal: .error("disk full"), focusedPane: .navigation)
+        let (nextState, effects) = TUIController.reduce(state, .key("\t"))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    // MARK: - Active-recording lock (Task 4 case 2)
+
+    @Test
+    func recordingLock_tab_isNoOp() {
+        let state = TUIState(
+            focusedPane: .navigation,
+            record: .recording(startedAt: Date(), captureSystemAudio: true)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\t"))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func recordingLock_navJ_isNoOp() {
+        let state = TUIState(
+            focusedPane: .navigation,
+            selectedSection: 0,
+            record: .recording(startedAt: Date(), captureSystemAudio: false)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("j"))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func recordingLock_navK_isNoOp() {
+        let state = TUIState(
+            focusedPane: .navigation,
+            selectedSection: 2,
+            record: .recording(startedAt: Date(), captureSystemAudio: true)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("k"))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func recordingLock_navEnter_isNoOp() {
+        let state = TUIState(
+            focusedPane: .navigation,
+            selectedSection: 0,
+            record: .recording(startedAt: Date(), captureSystemAudio: true)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\r"))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func recordingLock_q_isNoOp() {
+        let state = TUIState(
+            focusedPane: .navigation,
+            selectedSection: 0,
+            record: .recording(startedAt: Date(), captureSystemAudio: true)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("q"))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func recordingLock_s_emitsStopRecording_stateUnchanged() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 0,
+            record: .recording(startedAt: Date(), captureSystemAudio: true)
+        )
         let (nextState, effects) = TUIController.reduce(state, .key("s"))
         #expect(nextState == state)
         #expect(effects == [.stopRecording])
     }
 
     @Test
-    func recording_tick_returnsStateUnchanged_noEffects() {
-        let state = TUIState.recording(startedAt: Date(), captureSystemAudio: false)
-        let (nextState, effects) = TUIController.reduce(state, .tick(Date()))
+    func recordingLock_esc_emitsStopRecording_stateUnchanged() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 0,
+            record: .recording(startedAt: Date(), captureSystemAudio: true)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
         #expect(nextState == state)
-        #expect(effects.isEmpty)
+        #expect(effects == [.stopRecording])
     }
 
-    // MARK: - Recording Saved Tests
+    // MARK: - Section 0: Record
 
     @Test
-    func recordingSaved_keyReturn_transitionsToProcessing_withRunPipelineEffect() {
-        let recording = makeRecording()
-        let state = TUIState.recordingSaved(recording)
+    func record_idle_enter_transitionsToPrompting() {
+        let state = TUIState(focusedPane: .detail, selectedSection: 0, record: .idle)
         let (nextState, effects) = TUIController.reduce(state, .key("\r"))
-        if case .processing(let rec, let statusLine) = nextState {
+        #expect(nextState.record == .prompting)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func record_prompting_y_startsRecordingWithSystemAudioTrue() {
+        let state = TUIState(focusedPane: .detail, selectedSection: 0, record: .prompting)
+        let (nextState, effects) = TUIController.reduce(state, .key("y"))
+        if case .recording(_, let captureSystemAudio) = nextState.record {
+            #expect(captureSystemAudio == true)
+        } else {
+            #expect(Bool(false), "Expected .recording")
+        }
+        #expect(effects == [.startRecording(captureSystemAudio: true)])
+    }
+
+    @Test
+    func record_prompting_n_startsRecordingWithSystemAudioFalse() {
+        let state = TUIState(focusedPane: .detail, selectedSection: 0, record: .prompting)
+        let (nextState, effects) = TUIController.reduce(state, .key("n"))
+        if case .recording(_, let captureSystemAudio) = nextState.record {
+            #expect(captureSystemAudio == false)
+        } else {
+            #expect(Bool(false), "Expected .recording")
+        }
+        #expect(effects == [.startRecording(captureSystemAudio: false)])
+    }
+
+    @Test
+    func record_saved_enter_startsPipeline_andJumpsToRecordingsSection() {
+        let recording = makeRecording()
+        let state = TUIState(focusedPane: .detail, selectedSection: 0, record: .saved(recording))
+        let (nextState, effects) = TUIController.reduce(state, .key("\r"))
+        // The specific assertion the design review called out: all four
+        // must be true in the same reduce() call.
+        #expect(nextState.selectedSection == 1)
+        if case .processing(let rec, let statusLine) = nextState.recordings {
             #expect(rec.id == recording.id)
             #expect(statusLine == "Starting...")
         } else {
-            #expect(Bool(false), "Expected .processing state")
+            #expect(Bool(false), "Expected .processing on recordings")
         }
+        #expect(nextState.record == .idle)
+        #expect(nextState.focusedPane == .detail)
         #expect(effects == [.runPipeline(recording)])
     }
 
-    @Test
-    func recordingSaved_keyNewline_transitionsToProcessing_withRunPipelineEffect() {
-        let recording = makeRecording()
-        let state = TUIState.recordingSaved(recording)
-        let (nextState, effects) = TUIController.reduce(state, .key("\n"))
-        if case .processing(let rec, let statusLine) = nextState {
-            #expect(rec.id == recording.id)
-            #expect(statusLine == "Starting...")
-        } else {
-            #expect(Bool(false), "Expected .processing state")
-        }
-        #expect(effects == [.runPipeline(recording)])
-    }
+    // MARK: - Section 1: Recordings
 
     @Test
-    func recordingSaved_keyB_returnsToMainMenu() {
-        let recording = makeRecording()
-        let state = TUIState.recordingSaved(recording)
-        let (nextState, effects) = TUIController.reduce(state, .key("b"))
-        #expect(nextState == .mainMenu)
-        #expect(effects.isEmpty)
-    }
-
-    // MARK: - Browsing Tests
-
-    @Test
-    func browsing_keyJ_incrementsSelectedIndex_clampedToLast() {
+    func recordings_list_j_incrementsSelectedIndex() {
         let recordings = [makeRecording(title: "A"), makeRecording(title: "B"), makeRecording(title: "C")]
-        let state = TUIState.browsing(recordings: recordings, selectedIndex: 2) // Already at last
-        let (nextState, effects) = TUIController.reduce(state, .key("j"))
-        if case .browsing(_, let idx) = nextState {
-            #expect(idx == 2) // Clamped at last index
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(recordings: recordings, selectedIndex: 0)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key("j"))
+        if case .list(_, let idx) = nextState.recordings {
+            #expect(idx == 1)
         } else {
-            #expect(Bool(false), "Expected .browsing state")
+            #expect(Bool(false))
         }
-        #expect(effects.isEmpty)
     }
 
     @Test
-    func browsing_keyK_decrementsSelectedIndex_clampedToZero() {
+    func recordings_list_j_clampsAtLast() {
         let recordings = [makeRecording(title: "A"), makeRecording(title: "B"), makeRecording(title: "C")]
-        let state = TUIState.browsing(recordings: recordings, selectedIndex: 0) // Already at first
-        let (nextState, effects) = TUIController.reduce(state, .key("k"))
-        if case .browsing(_, let idx) = nextState {
-            #expect(idx == 0) // Clamped at 0
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(recordings: recordings, selectedIndex: 2)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key("j"))
+        if case .list(_, let idx) = nextState.recordings {
+            #expect(idx == 2)
         } else {
-            #expect(Bool(false), "Expected .browsing state")
+            #expect(Bool(false))
         }
-        #expect(effects.isEmpty)
     }
 
     @Test
-    func browsing_keyJ_and_K_moveWithinBounds() {
+    func recordings_list_k_decrementsSelectedIndex() {
         let recordings = [makeRecording(title: "A"), makeRecording(title: "B"), makeRecording(title: "C")]
-
-        // Start at index 1
-        var state = TUIState.browsing(recordings: recordings, selectedIndex: 1)
-        var (nextState, _) = TUIController.reduce(state, .key("j"))
-        if case .browsing(_, let idx) = nextState { #expect(idx == 2) } else { #expect(Bool(false)) }
-
-        state = nextState
-        (nextState, _) = TUIController.reduce(state, .key("k"))
-        if case .browsing(_, let idx) = nextState { #expect(idx == 1) } else { #expect(Bool(false)) }
-
-        state = nextState
-        (nextState, _) = TUIController.reduce(state, .key("k"))
-        if case .browsing(_, let idx) = nextState { #expect(idx == 0) } else { #expect(Bool(false)) }
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(recordings: recordings, selectedIndex: 2)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key("k"))
+        if case .list(_, let idx) = nextState.recordings {
+            #expect(idx == 1)
+        } else {
+            #expect(Bool(false))
+        }
     }
 
     @Test
-    func browsing_keyReturn_onNonEmpty_transitionsToProcessing_withRunPipelineEffect() {
+    func recordings_list_k_clampsAtZero() {
         let recordings = [makeRecording(title: "A"), makeRecording(title: "B")]
-        let state = TUIState.browsing(recordings: recordings, selectedIndex: 1)
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(recordings: recordings, selectedIndex: 0)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key("k"))
+        if case .list(_, let idx) = nextState.recordings {
+            #expect(idx == 0)
+        } else {
+            #expect(Bool(false))
+        }
+    }
+
+    @Test
+    func recordings_list_enter_onNonEmpty_runsPipeline() {
+        let recordings = [makeRecording(title: "A"), makeRecording(title: "B")]
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(recordings: recordings, selectedIndex: 1)
+        )
         let (nextState, effects) = TUIController.reduce(state, .key("\r"))
-        if case .processing(let rec, let statusLine) = nextState {
+        if case .processing(let rec, let statusLine) = nextState.recordings {
             #expect(rec.id == recordings[1].id)
             #expect(statusLine == "Starting...")
         } else {
-            #expect(Bool(false), "Expected .processing state")
+            #expect(Bool(false))
         }
         #expect(effects == [.runPipeline(recordings[1])])
     }
 
     @Test
-    func browsing_keyReturn_onEmpty_noOp() {
-        let state = TUIState.browsing(recordings: [], selectedIndex: 0)
+    func recordings_list_enter_onEmpty_isNoOp() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(recordings: [], selectedIndex: 0)
+        )
         let (nextState, effects) = TUIController.reduce(state, .key("\r"))
         #expect(nextState == state)
         #expect(effects.isEmpty)
     }
 
     @Test
-    func browsing_keyB_returnsToMainMenu() {
-        let recordings = [makeRecording()]
-        let state = TUIState.browsing(recordings: recordings, selectedIndex: 0)
-        let (nextState, effects) = TUIController.reduce(state, .key("b"))
-        #expect(nextState == .mainMenu)
-        #expect(effects.isEmpty)
-    }
-
-    // MARK: - Viewing Results Tests
-
-    @Test
-    func viewingResults_keyJ_incrementsScrollOffset() {
-        let transcript = makeTranscript()
-        let summary = makeSummary()
-        let state = TUIState.viewingResults(transcript: transcript, summary: summary, scrollOffset: 5)
-        let (nextState, effects) = TUIController.reduce(state, .key("j"))
-        if case .viewingResults(_, _, let offset) = nextState {
+    func recordings_viewingResults_j_incrementsUnclamped() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 5)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key("j"))
+        if case .viewingResults(_, _, let offset) = nextState.recordings {
             #expect(offset == 6)
         } else {
-            #expect(Bool(false), "Expected .viewingResults state")
+            #expect(Bool(false))
         }
-        #expect(effects.isEmpty)
     }
 
     @Test
-    func viewingResults_keyK_decrementsScrollOffset_clampedToZero() {
-        let transcript = makeTranscript()
-        let summary = makeSummary()
-        let state = TUIState.viewingResults(transcript: transcript, summary: summary, scrollOffset: 0)
-        let (nextState, effects) = TUIController.reduce(state, .key("k"))
-        if case .viewingResults(_, _, let offset) = nextState {
-            #expect(offset == 0) // Clamped at 0
+    func recordings_viewingResults_k_clampsAtZero() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 0)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key("k"))
+        if case .viewingResults(_, _, let offset) = nextState.recordings {
+            #expect(offset == 0)
         } else {
-            #expect(Bool(false), "Expected .viewingResults state")
+            #expect(Bool(false))
         }
-        #expect(effects.isEmpty)
     }
 
     @Test
-    func viewingResults_keyE_emitsExportResultEffect_withMarkdownFormat() {
+    func recordings_viewingResults_e_emitsExportMarkdown() {
         let transcript = makeTranscript()
         let summary = makeSummary()
-        let state = TUIState.viewingResults(transcript: transcript, summary: summary, scrollOffset: 0)
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: transcript, summary: summary, scrollOffset: 0)
+        )
         let (nextState, effects) = TUIController.reduce(state, .key("e"))
         #expect(nextState == state)
-        #expect(effects.count == 1)
-        if case .exportResult(let t, let s, let format) = effects[0] {
-            #expect(t.id == transcript.id)
-            #expect(s?.id == summary.id)
-            #expect(format == .markdown)
+        #expect(effects == [.exportResult(transcript: transcript, summary: summary, format: .markdown)])
+    }
+
+    // MARK: - Section 2: Settings
+
+    @Test
+    func settings_viewing_e_entersEditingWithPrefilledInput() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .viewing(resolvedPath: "/data/inner", source: .configFile)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("e"))
+        if case .editing(let input) = nextState.settings {
+            #expect(input == "/data/inner")
         } else {
-            #expect(Bool(false), "Expected .exportResult effect")
+            #expect(Bool(false), "Expected .editing")
+        }
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func settings_editing_printableChar_appends() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .editing(currentInput: "/tmp")
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("a"))
+        if case .editing(let input) = nextState.settings {
+            #expect(input == "/tmpa")
+        } else {
+            #expect(Bool(false))
+        }
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func settings_editing_backspace_removesLastChar() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .editing(currentInput: "/tmp/x")
+        )
+        let (nextState, _) = TUIController.reduce(state, .key("\u{7F}"))
+        if case .editing(let input) = nextState.settings {
+            #expect(input == "/tmp/")
+        } else {
+            #expect(Bool(false))
         }
     }
 
     @Test
-    func viewingResults_keyB_returnsToMainMenu() {
-        let transcript = makeTranscript()
-        let state = TUIState.viewingResults(transcript: transcript, summary: nil, scrollOffset: 10)
-        let (nextState, effects) = TUIController.reduce(state, .key("b"))
-        #expect(nextState == .mainMenu)
-        #expect(effects.isEmpty)
-    }
-
-    // MARK: - Error Message Tests
-
-    @Test
-    func errorMessage_keyB_returnsToMainMenu() {
-        let state = TUIState.errorMessage("Something went wrong")
-        let (nextState, effects) = TUIController.reduce(state, .key("b"))
-        #expect(nextState == .mainMenu)
-        #expect(effects.isEmpty)
-    }
-
-    // MARK: - Unhandled / Default Tests
-
-    @Test
-    func mainMenu_unhandledKey_returnsStateUnchanged_noEffects() {
-        let (nextState, effects) = TUIController.reduce(.mainMenu, .key("z"))
-        #expect(nextState == .mainMenu)
-        #expect(effects.isEmpty)
+    func settings_editing_backspace_onEmpty_isSafe() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .editing(currentInput: "")
+        )
+        let (nextState, _) = TUIController.reduce(state, .key("\u{7F}"))
+        if case .editing(let input) = nextState.settings {
+            #expect(input == "")
+        } else {
+            #expect(Bool(false))
+        }
     }
 
     @Test
-    func recording_unhandledKey_returnsStateUnchanged_noEffects() {
-        let state = TUIState.recording(startedAt: Date(), captureSystemAudio: true)
-        let (nextState, effects) = TUIController.reduce(state, .key("x"))
-        #expect(nextState == state)
-        #expect(effects.isEmpty)
+    func settings_editing_enter_emitsSaveDataDirectory() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .editing(currentInput: "/new/data")
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\r"))
+        // state.settings stays .editing (run loop overwrites after the save
+        // completes); only the effect is emitted.
+        if case .editing(let input) = nextState.settings {
+            #expect(input == "/new/data")
+        } else {
+            #expect(Bool(false))
+        }
+        #expect(effects == [.saveDataDirectory("/new/data")])
+    }
+
+    @Test
+    func settings_editing_esc_emitsLoadConfigStatus() {
+        // Per TASK 4's documented reasoning: Esc during .editing cannot
+        // reconstruct the pre-edit .viewing snapshot from in-state data
+        // alone, so it reuses .loadConfigStatus (the same effect emitted
+        // when first entering Settings) and resets settings to a harmless
+        // placeholder; the run loop's .loadConfigStatus handler will
+        // overwrite it with the real current (unsaved-edit-discarded)
+        // resolved path/source before the next render.
+        let state = TUIState(
+            focusedPane: .navigation,
+            selectedSection: 2,
+            settings: .editing(currentInput: "/tmp/typed")
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        if case .viewing(let resolvedPath, let source) = nextState.settings {
+            #expect(resolvedPath == "")
+            #expect(source == .defaultLocation)
+        } else {
+            #expect(Bool(false), "Expected placeholder .viewing after Esc")
+        }
+        #expect(effects == [.loadConfigStatus])
     }
 }

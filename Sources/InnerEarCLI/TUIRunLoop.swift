@@ -4,6 +4,10 @@ import InnerEarTUIKit
 
 /// The TUI run loop: bridges the pure `TUIController.reduce` state machine
 /// with the real async service implementations and terminal I/O.
+///
+/// This loop owns the live `TUIState`, applies key events to it via
+/// `TUIController.reduce`, and then executes any returned effects
+/// (`TUIEffect` values), updating state based on their async results.
 enum TUIRunLoop {
     static func run(
         audioCapture: AVFoundationAudioCaptureService,
@@ -20,7 +24,12 @@ enum TUIRunLoop {
             rawMode.restore()
         }
 
-        var state: TUIState = .mainMenu
+        // `store` is mutable because `.saveDataDirectory` may need to
+        // rebuild it (a fresh `RecordingStore` reads the (possibly new)
+        // config.json from disk on init).
+        var store = store
+
+        var state = TUIState()
 
         // Renders `state` immediately, using a freshly-queried terminal size.
         // Effects like `.runPipeline` set `state` multiple times in sequence
@@ -47,7 +56,7 @@ enum TUIRunLoop {
                 }
 
                 // Show the immediate result of the keypress (e.g. entering
-                // recordPrompt, or the "Starting..." processing screen)
+                // .prompting, or the "Starting..." processing screen)
                 // before executing any effect, which may block for a while.
                 renderNow()
 
@@ -61,17 +70,17 @@ enum TUIRunLoop {
                         case .stopRecording:
                             let recording = try await audioCapture.stopCapture()
                             try store.save(recording)
-                            state = .recordingSaved(recording)
+                            state.record = .saved(recording)
                             renderNow()
 
                         case .loadRecordings:
                             let recordings = try store.listRecordings()
-                            state = .browsing(recordings: recordings, selectedIndex: 0)
+                            state.recordings = .list(recordings: recordings, selectedIndex: 0)
                             renderNow()
 
                         case .runPipeline(let recording):
                             // Transcribe
-                            state = .processing(recording: recording, statusLine: "Transcribing...")
+                            state.recordings = .processing(recording: recording, statusLine: "Transcribing...")
                             renderNow()
                             let transcript = try await transcription.transcribe(
                                 recording: recording,
@@ -80,7 +89,7 @@ enum TUIRunLoop {
                             )
 
                             // Diarize
-                            state = .processing(recording: recording, statusLine: "Diarizing...")
+                            state.recordings = .processing(recording: recording, statusLine: "Diarizing...")
                             renderNow()
                             let diarizedTranscript = try await diarization.diarize(
                                 transcript: transcript,
@@ -88,7 +97,7 @@ enum TUIRunLoop {
                             )
 
                             // Summarize
-                            state = .processing(recording: recording, statusLine: "Summarizing...")
+                            state.recordings = .processing(recording: recording, statusLine: "Summarizing...")
                             renderNow()
                             let summary = try await summarization.summarize(transcript: diarizedTranscript)
 
@@ -97,7 +106,7 @@ enum TUIRunLoop {
                             try store.save(summary)
 
                             // Transition to results view
-                            state = .viewingResults(
+                            state.recordings = .viewingResults(
                                 transcript: diarizedTranscript,
                                 summary: summary,
                                 scrollOffset: 0
@@ -137,12 +146,60 @@ enum TUIRunLoop {
                             // so this loop is self-pacing without spinning.
                             while readKeyNonBlocking() == nil {}
 
+                        case .loadConfigStatus:
+                            let (url, sourceInfo) = InnerEarConfigResolver.resolveDataDirectoryWithSource()
+                            state.settings = .viewing(
+                                resolvedPath: url.path,
+                                source: mapSource(sourceInfo)
+                            )
+                            renderNow()
+
+                        case .saveDataDirectory(let path):
+                            // Two distinct failure/success paths. On write
+                            // failure, surface a modal and skip the rest of
+                            // this iteration (the `continue` jumps to the
+                            // next effect in the `for effect in effects`
+                            // loop without trying to refresh state from a
+                            // half-rewritten store). On success, recreate
+                            // the store (so it picks up the new config),
+                            // refresh the status, and invalidate the cached
+                            // Recordings list.
+                            do {
+                                try InnerEarConfigResolver.writeRecordingsDirectory(path)
+                            } catch {
+                                state.modal = .error("\(error)")
+                                renderNow()
+                                continue
+                            }
+                            // Success path.
+                            do {
+                                store = try RecordingStore()
+                            } catch {
+                                state.modal = .error("\(error)")
+                                renderNow()
+                                continue
+                            }
+                            let (url, sourceInfo) = InnerEarConfigResolver.resolveDataDirectoryWithSource()
+                            state.settings = .viewing(
+                                resolvedPath: url.path,
+                                source: mapSource(sourceInfo)
+                            )
+                            // Reload the Recordings list from the fresh
+                            // store (its contents live under the new data
+                            // directory). If the list call throws for any
+                            // reason, fall back to an empty list rather
+                            // than surfacing another error here — the
+                            // user can always re-enter the pane to retry.
+                            let recordings = (try? store.listRecordings()) ?? []
+                            state.recordings = .list(recordings: recordings, selectedIndex: 0)
+                            renderNow()
+
                         case .quit:
                             rawMode.restore()
                             return
                         }
                     } catch {
-                        state = .errorMessage("\(error)")
+                        state.modal = .error("\(error)")
                         renderNow()
                     }
                 }
@@ -154,6 +211,19 @@ enum TUIRunLoop {
 
             // 3. Pace the loop
             try await Task.sleep(for: .milliseconds(150))
+        }
+    }
+
+    /// Map `InnerEarConfigResolver.DataDirectorySourceInfo` (Core) to
+    /// `TUIState.DataDirectorySource` (TUIKit). The two enums are kept
+    /// structurally identical precisely so this mapping is mechanical
+    /// and total; a switch here keeps the dependency direction Core -> TUIKit
+    /// from being violated (the TUIKit enum cannot live in Core).
+    private static func mapSource(_ source: InnerEarConfigResolver.DataDirectorySourceInfo) -> DataDirectorySource {
+        switch source {
+        case .envVar:          return .envVar
+        case .configFile:      return .configFile
+        case .defaultLocation: return .defaultLocation
         }
     }
 }
