@@ -200,7 +200,8 @@ public actor WhisperKitTranscriptionService: TranscriptionService {
             modelUsed: model.rawValue,
             speakers: [defaultSpeaker],
             segments: segments,
-            generatedAt: Date()
+            generatedAt: Date(),
+            recordingStartedAt: recording.createdAt
         )
     }
 }

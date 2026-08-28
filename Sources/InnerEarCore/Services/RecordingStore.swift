@@ -18,8 +18,7 @@ public final class RecordingStore: Sendable {
     private let decoder: JSONDecoder
 
     public init() throws {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        self.baseDirectory = appSupport.appendingPathComponent("InnerEar", isDirectory: true)
+        self.baseDirectory = InnerEarConfigResolver.resolveDataDirectory()
 
         let subdirs = ["recordings", "transcripts", "summaries"]
         for subdir in subdirs {
