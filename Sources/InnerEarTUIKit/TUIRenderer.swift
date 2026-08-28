@@ -356,13 +356,17 @@ public enum TUIRenderer {
     /// exactly, but without its per-pane footer (the global footer at the
     /// bottom of the frame now serves that role).
     ///
-    /// The OLD implementation used `transcript.fullText` — segments
-    /// concatenated into one flat blob — which discarded per-segment
-    /// timestamps and speaker attribution. The new "rendered, not echoed"
-    /// construction builds ONE "paragraph" per segment (joined with blank
-    /// lines) so the wrap/scroll logic treats each segment as a distinct
-    /// scrollable unit while keeping all the downstream clamping math
-    /// unchanged.
+    /// Segments are grouped into speaker TURNS before rendering: WhisperKit
+    /// commonly splits one sentence into several short segments, which —
+    /// rendered one-tag-per-segment — produced a wall of near-duplicate
+    /// "[00:00]"/"[00:02]"/"[00:03]" tags for what was really one person
+    /// talking continuously. Consecutive segments sharing the same
+    /// `speakerID` are merged into a single paragraph carrying only the
+    /// FIRST segment's timestamp (a turn's start, not a running tag per
+    /// sentence fragment). This is purely a display grouping — the
+    /// underlying `Transcript.segments` array (and everything exported to
+    /// file) is completely unchanged; only how this one view presents them
+    /// is different.
     private static func renderRecordingsResults(
         transcript: Transcript,
         summary: Summary?,
@@ -370,15 +374,7 @@ public enum TUIRenderer {
         width: Int,
         height: Int
     ) -> [String] {
-        // Per-segment paragraphs: "[MM:SS] SpeakerLabel: text". One segment
-        // = one paragraph, joined with blank lines so the wrap/split loop
-        // below treats them as distinct visual blocks.
-        var paragraphs: [String] = []
-        for segment in transcript.segments {
-            let speakerLabel = transcript.speaker(for: segment)?.label ?? "Unknown"
-            let timestamp = formatSegmentTime(segment.startTime)
-            paragraphs.append("[\(timestamp)] \(speakerLabel): \(segment.text)")
-        }
+        let paragraphs = groupedSpeakerTurnParagraphs(for: transcript)
         var fullText = paragraphs.joined(separator: "\n\n")
 
         if let summary = summary {
@@ -446,6 +442,36 @@ public enum TUIRenderer {
         let minutes = Int(time) / 60
         let seconds = Int(time) % 60
         return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    /// Merge consecutive same-speaker segments into one "[MM:SS] Speaker:"
+    /// paragraph per turn (see `renderRecordingsResults`'s doc comment for
+    /// why). Segments are assumed already in chronological order (true for
+    /// both the plain WhisperKitTranscriptionService output and
+    /// ChannelBasedDiarizationService's merged/sorted result) — this only
+    /// groups adjacent runs, it does not reorder anything.
+    private static func groupedSpeakerTurnParagraphs(for transcript: Transcript) -> [String] {
+        struct Turn {
+            let speakerID: UUID?
+            let startTime: TimeInterval
+            var texts: [String]
+        }
+
+        var turns: [Turn] = []
+        for segment in transcript.segments {
+            if let last = turns.last, last.speakerID == segment.speakerID {
+                turns[turns.count - 1].texts.append(segment.text)
+            } else {
+                turns.append(Turn(speakerID: segment.speakerID, startTime: segment.startTime, texts: [segment.text]))
+            }
+        }
+
+        return turns.map { turn in
+            let speakerLabel = transcript.speakers.first { $0.id == turn.speakerID }?.label ?? "Unknown"
+            let timestamp = formatSegmentTime(turn.startTime)
+            let text = turn.texts.joined(separator: " ")
+            return "[\(timestamp)] \(speakerLabel): \(text)"
+        }
     }
 
     /// The last field on a Recordings-list row: the recording's duration,

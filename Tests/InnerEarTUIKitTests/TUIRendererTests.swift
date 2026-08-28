@@ -452,6 +452,73 @@ struct TUIRendererTests {
     }
 
     @Test
+    func recordings_viewingResults_groupsConsecutiveSameSpeakerSegments_intoOneTurn() {
+        // Regression test: WhisperKit commonly splits one sentence into
+        // several short segments; rendering one [MM:SS] tag per segment
+        // produced a wall of near-duplicate timestamps for one continuous
+        // turn. Consecutive same-speaker segments must now merge into a
+        // single paragraph carrying only the FIRST segment's timestamp.
+        let speaker = Speaker(label: "Speaker 1", colorHex: "#3478F6", isLocalUser: true)
+        let transcript = Transcript(
+            id: UUID(),
+            recordingID: UUID(),
+            languageCode: "en",
+            modelUsed: TranscriptionModel.whisperLargeV3Turbo.rawValue,
+            speakers: [speaker],
+            segments: [
+                TranscriptSegment(speakerID: speaker.id, text: "Hello there,", startTime: 0, endTime: 1),
+                TranscriptSegment(speakerID: speaker.id, text: "how are you", startTime: 1, endTime: 2),
+                TranscriptSegment(speakerID: speaker.id, text: "doing today?", startTime: 2, endTime: 3)
+            ],
+            generatedAt: Date()
+        )
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: transcript, summary: nil, scrollOffset: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 120, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("[00:00] Speaker 1: Hello there, how are you doing today?"))
+        // Only the turn's starting timestamp should appear — not one tag
+        // per merged segment.
+        #expect(!joined.contains("[00:01]"))
+        #expect(!joined.contains("[00:02]"))
+    }
+
+    @Test
+    func recordings_viewingResults_separatesTurnsOnSpeakerChange() {
+        let local = Speaker(label: "Speaker 1", colorHex: "#3478F6", isLocalUser: true)
+        let remote = Speaker(label: "Speaker 2 (Remote)", colorHex: "#FF9500", isLocalUser: false)
+        let transcript = Transcript(
+            id: UUID(),
+            recordingID: UUID(),
+            languageCode: "en",
+            modelUsed: TranscriptionModel.whisperLargeV3Turbo.rawValue,
+            speakers: [local, remote],
+            segments: [
+                TranscriptSegment(speakerID: local.id, text: "Hi.", startTime: 0, endTime: 1),
+                TranscriptSegment(speakerID: remote.id, text: "Hey there.", startTime: 1, endTime: 2),
+                TranscriptSegment(speakerID: local.id, text: "How's it going?", startTime: 2, endTime: 3)
+            ],
+            generatedAt: Date()
+        )
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: transcript, summary: nil, scrollOffset: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 120, height: 24)
+        let joined = lines.joined(separator: "\n")
+        // Speaker change produces a NEW turn even though it's immediately
+        // followed by the first speaker again — turns don't merge across
+        // a change, only within a consecutive run of the same speaker.
+        #expect(joined.contains("[00:00] Speaker 1: Hi."))
+        #expect(joined.contains("[00:01] Speaker 2 (Remote): Hey there."))
+        #expect(joined.contains("[00:02] Speaker 1: How's it going?"))
+    }
+
+    @Test
     func recordings_list_marker_reflectsAudioAndTranscriptPresence() {
         let withBoth = RecordingListEntry(
             recording: makeRecording(title: "Both"),
