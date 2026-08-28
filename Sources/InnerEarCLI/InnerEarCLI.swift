@@ -1,6 +1,7 @@
 import ArgumentParser
 import Foundation
 import InnerEarCore
+import InnerEarTUIKit
 
 /// Top-level command for the `innerear` CLI.
 ///
@@ -28,7 +29,8 @@ struct InnerEarCLI: AsyncParsableCommand {
         subcommands: [
             RecordCommand.self,
             TranscribeCommand.self,
-            ExportCommand.self
+            ExportCommand.self,
+            TUICommand.self
         ],
         defaultSubcommand: nil
     )

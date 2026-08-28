@@ -51,6 +51,24 @@ public final class RecordingStore: Sendable {
         return try read(Recording.self, from: url, id: id)
     }
 
+    /// All persisted recordings, most recently created first. Skips any
+    /// file that fails to decode (e.g. a partially-written or foreign file
+    /// in the directory) rather than failing the whole listing.
+    public func listRecordings() throws -> [Recording] {
+        let directory = baseDirectory.appendingPathComponent("recordings", isDirectory: true)
+        let files = try FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "json" }
+
+        let recordings: [Recording] = files.compactMap { url in
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            return try? decoder.decode(Recording.self, from: data)
+        }
+
+        return recordings.sorted { $0.createdAt > $1.createdAt }
+    }
+
     // MARK: - Transcript
 
     public func save(_ transcript: Transcript) throws {
