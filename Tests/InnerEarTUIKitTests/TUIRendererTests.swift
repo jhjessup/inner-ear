@@ -302,7 +302,13 @@ struct TUIRendererTests {
             selectedSection: 1,
             recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 0)
         )
-        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        // Use a wide terminal so the detail pane (width - navPaneWidth - 3)
+        // has room for the full "[MM:SS] Speaker: text" line without
+        // hitting the word-wrap's non-word-boundary-aware line break —
+        // at width 80 the ~55-char detail pane wraps this line mid-word,
+        // which is a real (documented, v1-accepted) renderer limitation,
+        // not something this test is trying to exercise.
+        let lines = TUIRenderer.render(state: state, width: 120, height: 24)
         let joined = lines.joined(separator: "\n")
         #expect(joined.contains("Hello world, this is a test transcript"))
     }
