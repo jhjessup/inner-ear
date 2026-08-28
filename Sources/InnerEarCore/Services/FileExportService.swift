@@ -57,7 +57,8 @@ public final class FileExportService: ExportService, Sendable {
         for segment in transcript.segments {
             let speakerLabel = speakerLabel(for: segment, in: transcript)
             let timeRange = formatTimeRange(start: segment.startTime, end: segment.endTime)
-            md += "**[\(timeRange)] \(speakerLabel):** \(segment.text)\n\n"
+            let absoluteUTCTimestamp = absoluteTimestamp(for: segment, in: transcript)
+            md += "**[\(timeRange) | \(absoluteUTCTimestamp)] \(speakerLabel):** \(segment.text)\n\n"
         }
 
         if let summary = summary {
@@ -110,7 +111,8 @@ public final class FileExportService: ExportService, Sendable {
         for segment in transcript.segments {
             let speakerLabel = speakerLabel(for: segment, in: transcript)
             let timeRange = formatTimeRange(start: segment.startTime, end: segment.endTime)
-            txt += "[\(timeRange)] \(speakerLabel): \(segment.text)\n"
+            let absoluteUTCTimestamp = absoluteTimestamp(for: segment, in: transcript)
+            txt += "[\(timeRange) | \(absoluteUTCTimestamp)] \(speakerLabel): \(segment.text)\n"
         }
 
         if let summary = summary {
@@ -276,5 +278,14 @@ public final class FileExportService: ExportService, Sendable {
         let seconds = Int(time) % 60
         let millis = Int((time.truncatingRemainder(dividingBy: 1)) * 1000)
         return String(format: "%02d:%02d:%02d,%03d", hours, minutes, seconds, millis)
+    }
+
+    /// Compute the absolute UTC wall-clock timestamp for a segment by adding
+    /// the segment's relative `startTime` to the transcript's
+    /// `recordingStartedAt`, then format as an ISO-8601 string in UTC.
+    /// `ISO8601DateFormatter` produces UTC ("Z" suffix) by default.
+    private func absoluteTimestamp(for segment: TranscriptSegment, in transcript: Transcript) -> String {
+        let absoluteDate = transcript.recordingStartedAt.addingTimeInterval(segment.startTime)
+        return ISO8601DateFormatter().string(from: absoluteDate)
     }
 }

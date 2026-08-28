@@ -297,4 +297,110 @@ struct ExportServiceTests {
         // Timestamps should be formatted
         #expect(content.contains("00:00:00") || content.contains("00:00:01"))
     }
+
+    // MARK: - Absolute UTC timestamps in segment lines
+
+    /// Helper: build a transcript with a single, well-known
+    /// `recordingStartedAt` and a single segment at a known `startTime`,
+    /// so the expected absolute UTC timestamp can be computed exactly.
+    private func makeTranscriptForAbsoluteTimestampTest() -> Transcript {
+        let speaker = TestFixtures.speaker(label: "Alice", isLocalUser: true)
+        // Use a fixed epoch so the expected ISO string is deterministic.
+        let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        // Pick a non-zero start time so we can verify the
+        // `recordingStartedAt + startTime` math, not just `recordingStartedAt`.
+        let segmentStart: TimeInterval = 12.5
+        return Transcript(
+            recordingID: UUID(),
+            languageCode: "en",
+            modelUsed: "test-model",
+            speakers: [speaker],
+            segments: [
+                TranscriptSegment(speakerID: speaker.id, text: "Hello UTC", startTime: segmentStart, endTime: segmentStart + 1.0)
+            ],
+            generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            recordingStartedAt: startedAt
+        )
+    }
+
+    @Test
+    func exportMarkdown_includesAbsoluteUTCTimestampForEachSegment() async throws {
+        let transcript = makeTranscriptForAbsoluteTimestampTest()
+        let destination = tempDir.appendingPathComponent("absolute-ts.md")
+
+        _ = try await exportService.export(
+            transcript: transcript,
+            summary: nil,
+            format: .markdown,
+            to: destination
+        )
+
+        let content = try String(contentsOf: destination, encoding: .utf8)
+
+        // Compute the expected absolute timestamp exactly the same way the
+        // service does: `recordingStartedAt + segment.startTime`, formatted
+        // as ISO-8601 (UTC by default).
+        let expectedAbsoluteDate = transcript.recordingStartedAt.addingTimeInterval(12.5)
+        let expectedAbsoluteString = ISO8601DateFormatter().string(from: expectedAbsoluteDate)
+
+        // The formatted absolute timestamp must appear in the exported file
+        // (the markdown segment line now reads
+        //   **[00:00:12.500 – 00:00:13.500 | <ISO8601>] Alice:** Hello UTC
+        // — assert the ISO substring is present somewhere in the content).
+        #expect(content.contains(expectedAbsoluteString))
+    }
+
+    @Test
+    func exportPlainText_includesAbsoluteUTCTimestampForEachSegment() async throws {
+        let transcript = makeTranscriptForAbsoluteTimestampTest()
+        let destination = tempDir.appendingPathComponent("absolute-ts.txt")
+
+        _ = try await exportService.export(
+            transcript: transcript,
+            summary: nil,
+            format: .plainText,
+            to: destination
+        )
+
+        let content = try String(contentsOf: destination, encoding: .utf8)
+
+        let expectedAbsoluteDate = transcript.recordingStartedAt.addingTimeInterval(12.5)
+        let expectedAbsoluteString = ISO8601DateFormatter().string(from: expectedAbsoluteDate)
+
+        #expect(content.contains(expectedAbsoluteString))
+    }
+
+    @Test
+    func exportJSON_roundTripsRecordingStartedAt() async throws {
+        let transcript = makeTranscriptForAbsoluteTimestampTest()
+        let destination = tempDir.appendingPathComponent("absolute-ts.json")
+
+        _ = try await exportService.export(
+            transcript: transcript,
+            summary: nil,
+            format: .json,
+            to: destination
+        )
+
+        // Decode the file back using the same date strategy the service uses
+        // to encode (`.iso8601`).
+        struct ExportPayload: Codable {
+            let transcript: Transcript
+            let summary: Summary?
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let data = try Data(contentsOf: destination)
+        let payload = try decoder.decode(ExportPayload.self, from: data)
+
+        // `ISO8601DateFormatter` defaults to whole-second precision in UTC,
+        // so sub-second info is lost on round-trip. The encoder/decoder
+        // pair used here round-trips to second precision, so we assert the
+        // values agree to within one second of the original. (This matches
+        // the rest of the codebase's pattern of `.iso8601` without
+        // fractional seconds.)
+        let drift = abs(payload.transcript.recordingStartedAt.timeIntervalSince(transcript.recordingStartedAt))
+        #expect(drift < 1.0)
+    }
 }

@@ -25,7 +25,8 @@ struct ChannelBasedDiarizationServiceTests {
                 TranscriptSegment(speakerID: local.id, text: "Hello, can you hear me?", startTime: 0.0, endTime: 1.5),
                 TranscriptSegment(speakerID: local.id, text: "I have a question.", startTime: 3.0, endTime: 4.2),
             ],
-            generatedAt: Date(timeIntervalSince1970: 1_000_000)
+            generatedAt: Date(timeIntervalSince1970: 1_000_000),
+            recordingStartedAt: Date(timeIntervalSince1970: 1_000_000)
         )
     }
 
@@ -138,5 +139,50 @@ struct ChannelBasedDiarizationServiceTests {
         #expect(merged.recordingID == original.recordingID)
         #expect(merged.languageCode == original.languageCode)
         #expect(merged.modelUsed == original.modelUsed)
+    }
+
+    // MARK: - recordingStartedAt preservation
+
+    @Test
+    func diarize_withoutSystemAudio_preservesRecordingStartedAt() async throws {
+        // The no-system-audio path returns the input transcript unchanged,
+        // so the `recordingStartedAt` it carries must come back identically.
+        let service = ChannelBasedDiarizationService(
+            transcriptionService: FakeTranscriptionService(stubbedTranscript: makeSystemAudioStub())
+        )
+        let original = makeLocalTranscript()
+        let recordingNoSys = Recording(
+            title: "r",
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 5,
+            microphoneFileURL: URL(fileURLWithPath: "/tmp/mic.caf")
+        )
+
+        let result = try await service.diarize(transcript: original, recording: recordingNoSys)
+
+        #expect(result.recordingStartedAt == original.recordingStartedAt)
+    }
+
+    @Test
+    func diarize_withSystemAudio_preservesRecordingStartedAt() async throws {
+        // On the merge path, the service constructs a brand-new Transcript
+        // and must explicitly forward `recordingStartedAt` from the input —
+        // a re-default to `Date()` would lose the original recording start
+        // time and silently corrupt downstream exports.
+        let service = ChannelBasedDiarizationService(
+            transcriptionService: FakeTranscriptionService(stubbedTranscript: makeSystemAudioStub())
+        )
+        let original = makeLocalTranscript()
+        let recordingWithSys = Recording(
+            title: "r",
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 5,
+            microphoneFileURL: URL(fileURLWithPath: "/tmp/mic.caf"),
+            systemAudioFileURL: URL(fileURLWithPath: "/tmp/sys.caf")
+        )
+
+        let merged = try await service.diarize(transcript: original, recording: recordingWithSys)
+
+        #expect(merged.recordingStartedAt == original.recordingStartedAt)
     }
 }

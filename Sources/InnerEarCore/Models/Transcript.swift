@@ -10,6 +10,13 @@ public struct Transcript: Identifiable, Hashable, Codable, Sendable {
     public let speakers: [Speaker]
     public let segments: [TranscriptSegment]
     public let generatedAt: Date
+    /// Wall-clock time the underlying recording started. Used by export
+    /// formats to render absolute UTC timestamps for each segment
+    /// (in addition to the segment's own relative `startTime`). Defaults
+    /// to `Date()` for convenience at construction sites that don't have
+    /// a recording in hand; transcription services MUST pass the actual
+    /// `recording.createdAt` so per-segment absolute times are correct.
+    public let recordingStartedAt: Date
 
     public init(
         id: UUID = UUID(),
@@ -18,7 +25,8 @@ public struct Transcript: Identifiable, Hashable, Codable, Sendable {
         modelUsed: String,
         speakers: [Speaker],
         segments: [TranscriptSegment],
-        generatedAt: Date
+        generatedAt: Date,
+        recordingStartedAt: Date = Date()
     ) {
         self.id = id
         self.recordingID = recordingID
@@ -27,6 +35,7 @@ public struct Transcript: Identifiable, Hashable, Codable, Sendable {
         self.speakers = speakers
         self.segments = segments
         self.generatedAt = generatedAt
+        self.recordingStartedAt = recordingStartedAt
     }
 
     public var fullText: String {

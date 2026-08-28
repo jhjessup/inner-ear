@@ -136,7 +136,8 @@ public final class ChannelBasedDiarizationService: DiarizationService, @unchecke
             modelUsed: transcript.modelUsed,
             speakers: transcript.speakers + [remoteSpeaker],
             segments: mergedSegments,
-            generatedAt: Date()
+            generatedAt: Date(),
+            recordingStartedAt: transcript.recordingStartedAt
         )
     }
 }
