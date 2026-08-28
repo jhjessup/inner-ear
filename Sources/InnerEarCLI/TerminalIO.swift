@@ -4,8 +4,20 @@ import Darwin
 /// Raw terminal mode manager. Puts stdin into non-canonical, no-echo mode
 /// on init, and restores the original settings on `restore()` or `deinit`.
 /// Uses POSIX `termios` APIs via Darwin.
-final class RawTerminalMode {
+///
+/// `@unchecked Sendable`: `restore()` can now be called from two contexts —
+/// the main run loop's normal exit paths, and the SIGINT/SIGTERM handler's
+/// `restoreAction` closure, which must be `@Sendable` since it's captured
+/// by an unstructured `Task`. `originalTermios` is set once in `init` and
+/// never mutated again, so it's safe to read from either context without
+/// synchronization; `isRestored`'s check-and-set is guarded by a lock so a
+/// genuinely concurrent call from both paths can't race (the practical
+/// consequence of losing that race would only be a harmless redundant
+/// restore, but this avoids relying on that being "fine" and just makes it
+/// actually safe).
+final class RawTerminalMode: @unchecked Sendable {
     private var originalTermios: termios
+    private let lock = NSLock()
     private var isRestored = false
 
     init() throws {
@@ -44,8 +56,11 @@ final class RawTerminalMode {
         rawTerminalWrite("\u{1B}[?1049h")
     }
 
-    /// Restore the original terminal settings. Safe to call multiple times.
+    /// Restore the original terminal settings. Safe to call multiple times,
+    /// and safe to call concurrently from more than one context.
     func restore() {
+        lock.lock()
+        defer { lock.unlock() }
         guard !isRestored else { return }
         _ = tcsetattr(STDIN_FILENO, TCSANOW, &originalTermios)
         // Leave the alternate screen buffer, restoring the user's original
@@ -129,10 +144,14 @@ func readKeyOrArrowNonBlocking() -> Character? {
     // adds latency to a bare Esc keypress (once per press), not to every
     // frame. This is the same ambiguity every terminal app with both
     // "Esc means something" and "arrow keys work" has to resolve.
-    guard let second = readRawByteNonBlocking(), second == UInt8(ascii: "[") else {
+    let second = readRawByteNonBlocking()
+    guard second == UInt8(ascii: "[") else {
         // Not an escape sequence — this was a bare Esc. If a second byte
         // WAS read but wasn't '[', push it back so it isn't silently
         // dropped; it belongs to whatever the user pressed next.
+        // (`second` must be a plain local, not a `guard let` binding —
+        // bindings from `guard let x = ..., cond else { ... }` are only
+        // visible AFTER the guard succeeds, not inside its own else block.)
         if let second { pendingByte = second }
         return Character(UnicodeScalar(first))
     }
@@ -204,8 +223,8 @@ func writeToTerminal(_ lines: [String]) {
 ///     scoped narrowly to shutdown and bounded so it can't regress the
 ///     "no new concurrency surface" goal the rest of the run loop keeps.
 func installSignalHandlers(
-    restoreAction: @escaping () -> Void,
-    cleanup: @escaping () async -> Void
+    restoreAction: @escaping @Sendable () -> Void,
+    cleanup: @escaping @Sendable () async -> Void
 ) {
     // Ignore default dispositions so our handler runs exclusively.
     signal(SIGINT, SIG_IGN)
@@ -248,7 +267,7 @@ func installSignalHandlers(
 /// the first resume counts) genuinely doesn't wait for the loser — the
 /// loser keeps running in the background, which is fine here since the
 /// caller calls `exit(0)` immediately after, killing it regardless.
-private func raceAgainstTimeout(_ work: @escaping () async -> Void, seconds: Int) async {
+private func raceAgainstTimeout(_ work: @escaping @Sendable () async -> Void, seconds: Int) async {
     let guardActor = FirstWriterWins()
     await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
         Task {
