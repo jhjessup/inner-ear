@@ -110,13 +110,28 @@ enum TUIRunLoop {
                             let outputURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
                                 .appendingPathComponent("\(transcript.id.uuidString).\(ext)")
 
+                            // Export doesn't have its own TUIState case (the
+                            // plan scoped it as an optional brief confirmation,
+                            // not a full screen), so show progress/result via
+                            // direct terminal writes rather than the state
+                            // machine — state stays .viewingResults throughout,
+                            // and the normal render resumes on the next loop
+                            // tick after the confirmation pause below.
+                            writeToTerminal(["Exporting to \(outputURL.lastPathComponent)..."])
+
                             _ = try await export.export(
                                 transcript: transcript,
                                 summary: summary,
                                 format: format,
                                 to: outputURL
                             )
-                            // Optionally show a brief confirmation — for now just stay in viewingResults
+
+                            writeToTerminal([
+                                "Exported to: \(outputURL.path)",
+                                "",
+                                "[any key] Continue"
+                            ])
+                            try await Task.sleep(for: .milliseconds(1200))
 
                         case .quit:
                             rawMode.restore()
