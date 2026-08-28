@@ -131,7 +131,11 @@ enum TUIRunLoop {
                                 "",
                                 "[any key] Continue"
                             ])
-                            try await Task.sleep(for: .milliseconds(1200))
+                            // Actually wait for a keypress rather than a fixed
+                            // delay — readKeyNonBlocking() already blocks for
+                            // up to VTIME's 0.1s per call (see RawTerminalMode),
+                            // so this loop is self-pacing without spinning.
+                            while readKeyNonBlocking() == nil {}
 
                         case .quit:
                             rawMode.restore()
