@@ -279,7 +279,7 @@ struct TUIControllerTests {
 
     @Test
     func modal_otherKey_isSwallowed() {
-        let state = TUIState(modal: .error("disk full"), focusedPane: .navigation, selectedSection: 0)
+        let state = TUIState(focusedPane: .navigation, selectedSection: 0, modal: .error("disk full"))
         let (nextState, effects) = TUIController.reduce(state, .key("q"))
         #expect(nextState == state)
         #expect(effects.isEmpty)
@@ -287,7 +287,7 @@ struct TUIControllerTests {
 
     @Test
     func modal_tab_isSwallowed() {
-        let state = TUIState(modal: .error("disk full"), focusedPane: .navigation)
+        let state = TUIState(focusedPane: .navigation, modal: .error("disk full"))
         let (nextState, effects) = TUIController.reduce(state, .key("\t"))
         #expect(nextState == state)
         #expect(effects.isEmpty)
