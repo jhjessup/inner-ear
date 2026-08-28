@@ -85,8 +85,10 @@ func writeToTerminal(_ lines: [String]) {
         output += line
         output += "\r\n"
     }
-    let data = output.utf8
-    _ = write(STDOUT_FILENO, data, data.count)
+    let bytes = Array(output.utf8)
+    bytes.withUnsafeBytes { buffer in
+        _ = write(STDOUT_FILENO, buffer.baseAddress, buffer.count)
+    }
 }
 
 /// Install signal handlers for SIGINT and SIGTERM that call `restoreAction`
@@ -111,9 +113,11 @@ func installSignalHandlers(restoreAction: @escaping () -> Void) {
     signal(SIGTERM, SIG_IGN)
 
     // Retain the dispatch sources for the lifetime of the process.
-    // Using a static property ensures they stay alive.
+    // Using a static property ensures they stay alive. `nonisolated(unsafe)`
+    // is safe here: appends happen only during this one setup call at
+    // startup (never concurrently), and the array is never read again.
     struct Holder {
-        static var sources: [DispatchSourceSignal] = []
+        nonisolated(unsafe) static var sources: [DispatchSourceSignal] = []
     }
 
     let signalQueue = DispatchQueue(label: "com.innerear.tui.signals")
