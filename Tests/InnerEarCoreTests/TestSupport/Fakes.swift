@@ -42,7 +42,12 @@ final class FakeTranscriptionService: TranscriptionService, @unchecked Sendable 
         self.stubbedTranscript = stubbedTranscript
     }
 
-    func transcribe(recording: Recording, model: TranscriptionModel, languageCode: String?) async throws -> Transcript {
+    func transcribe(
+        recording: Recording,
+        model: TranscriptionModel,
+        languageCode: String?,
+        progressHandler: (@Sendable (Int) -> Void)?
+    ) async throws -> Transcript {
         transcribeCallCount += 1
         if let transcribeError { throw transcribeError }
         return stubbedTranscript

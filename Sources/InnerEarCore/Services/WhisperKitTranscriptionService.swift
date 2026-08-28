@@ -51,7 +51,8 @@ public actor WhisperKitTranscriptionService: TranscriptionService {
     public func transcribe(
         recording: Recording,
         model: TranscriptionModel,
-        languageCode: String?
+        languageCode: String?,
+        progressHandler: (@Sendable (Int) -> Void)?
     ) async throws -> Transcript {
         // Map our domain enum to WhisperKit's model identifier. Reject
         // unsupported models cleanly rather than letting WhisperKit fail
@@ -96,7 +97,21 @@ public actor WhisperKitTranscriptionService: TranscriptionService {
         do {
             results = try await pipeline.transcribe(
                 audioPath: audioURL.path,
-                decodeOptions: options
+                decodeOptions: options,
+                callback: { progress in
+                    // Running word count from the accumulated decoded text so
+                    // far — WhisperKit's TranscriptionProgress has no
+                    // fraction-complete field, only growing text/tokens, so a
+                    // word count is the most honest "progress" signal
+                    // available. This closure is plain @Sendable, not async,
+                    // not actor-isolated (WhisperKit may call it from any
+                    // thread) — it must not touch this actor's isolated
+                    // state (pipelineByModel etc.), only call the passed-in
+                    // progressHandler and read the immutable `progress` value.
+                    let wordCount = progress.text.split(separator: " ").count
+                    progressHandler?(wordCount)
+                    return true // never cancel transcription from here
+                }
             )
         } catch {
             throw TranscriptionError.transcriptionFailed(reason: error.localizedDescription)
@@ -122,7 +137,8 @@ public actor WhisperKitTranscriptionService: TranscriptionService {
         return try await transcribe(
             recording: recording,
             model: model,
-            languageCode: nil
+            languageCode: nil,
+            progressHandler: nil
         )
     }
 

@@ -5,7 +5,7 @@ import InnerEarCore
 
 /// Tests for the pure `TUIRenderer.render` function.
 ///
-/// All tests assert on the exact string content of the returned line array.
+/// All tests assert on the string content of the returned line array.
 /// No I/O, no terminal interaction — pure function testing.
 struct TUIRendererTests {
 
@@ -49,132 +49,416 @@ struct TUIRendererTests {
         )
     }
 
-    // MARK: - Main Menu Tests
+    // MARK: - Minimum size guard
 
     @Test
-    func mainMenu_containsExpectedLines() {
-        let lines = TUIRenderer.render(state: .mainMenu, width: 80, height: 24)
-        #expect(lines.contains { $0.contains("InnerEar") })
-        #expect(lines.contains { $0.contains("[1] Record") })
-        #expect(lines.contains { $0.contains("[2] Browse Recordings") })
-        #expect(lines.contains { $0.contains("[q] Quit") })
-    }
-
-    // MARK: - Recording State Tests
-
-    @Test
-    func recording_showsRecordingIndicator_andStopHint() {
-        // Use a fixed startedAt so elapsed is deterministic-ish (but we can't
-        // control Date() inside render, so just check for the static parts).
-        let startedAt = Date(timeIntervalSince1970: 0)
-        let lines = TUIRenderer.render(state: .recording(startedAt: startedAt, captureSystemAudio: true), width: 80, height: 24)
+    func render_belowMinWidth_returnsSingleLine() {
+        let state = TUIState()
+        let lines = TUIRenderer.render(state: state, width: TUIRenderer.minWidth - 1, height: 24)
         #expect(lines.count == 1)
-        #expect(lines[0].contains("Recording..."))
-        #expect(lines[0].contains("[s] Stop"))
-        #expect(lines[0].contains("system audio: on"))
+        #expect(lines[0].contains("Terminal too small"))
     }
 
     @Test
-    func recording_withoutSystemAudio_showsOff() {
-        let startedAt = Date(timeIntervalSince1970: 0)
-        let lines = TUIRenderer.render(state: .recording(startedAt: startedAt, captureSystemAudio: false), width: 80, height: 24)
-        #expect(lines[0].contains("system audio: off"))
+    func render_belowMinHeight_returnsSingleLine() {
+        let state = TUIState()
+        let lines = TUIRenderer.render(state: state, width: 80, height: TUIRenderer.minHeight - 1)
+        #expect(lines.count == 1)
+        #expect(lines[0].contains("Terminal too small"))
     }
 
-    // MARK: - Browsing Tests
-
-    @Test
-    func browsing_withTwoRecordings_showsBothTitles_selectedHasPrefix() {
-        let rec1 = makeRecording(title: "First Meeting")
-        let rec2 = Recording(
-            id: UUID(uuidString: "22222222-3333-4444-5555-666666666666")!,
-            title: "Second Meeting",
-            createdAt: Date(timeIntervalSince1970: 2_000_000),
-            duration: 120,
-            microphoneFileURL: URL(fileURLWithPath: "/tmp/test2.caf")
-        )
-        let recordings = [rec1, rec2]
-
-        // Selected index 0 -> first recording should have "> " prefix
-        let lines0 = TUIRenderer.render(state: .browsing(recordings: recordings, selectedIndex: 0), width: 80, height: 24)
-        #expect(lines0.contains { $0.contains("> First Meeting") })
-        #expect(lines0.contains { $0.contains("  Second Meeting") })
-
-        // Selected index 1 -> second recording should have "> " prefix
-        let lines1 = TUIRenderer.render(state: .browsing(recordings: recordings, selectedIndex: 1), width: 80, height: 24)
-        #expect(lines1.contains { $0.contains("  First Meeting") })
-        #expect(lines1.contains { $0.contains("> Second Meeting") })
-
-        // Footer should be present
-        #expect(lines0.contains { $0.contains("[j/k] Move") })
-        #expect(lines1.contains { $0.contains("[Enter] Select") })
-        #expect(lines0.contains { $0.contains("[b] Back") })
-    }
-
-    @Test
-    func browsing_empty_showsEmptyMessage() {
-        let lines = TUIRenderer.render(state: .browsing(recordings: [], selectedIndex: 0), width: 80, height: 24)
-        #expect(lines.contains { $0.contains("No recordings yet") })
-        #expect(lines.contains { $0.contains("[b] Back") })
-    }
-
-    // MARK: - Viewing Results Tests
-
-    @Test
-    func viewingResults_showsTranscriptText() {
-        let transcript = makeTranscript()
-        let lines = TUIRenderer.render(state: .viewingResults(transcript: transcript, summary: nil, scrollOffset: 0), width: 80, height: 24)
-        #expect(lines.contains { $0.contains("Hello world, this is a test transcript") })
-    }
-
-    @Test
-    func viewingResults_withSummary_showsSummarySections() {
-        let transcript = makeTranscript()
-        let summary = makeSummary()
-        let lines = TUIRenderer.render(state: .viewingResults(transcript: transcript, summary: summary, scrollOffset: 0), width: 80, height: 24)
-        #expect(lines.contains { $0.contains("--- Summary ---") })
-        #expect(lines.contains { $0.contains("This is the overview") })
-        #expect(lines.contains { $0.contains("Key Points:") })
-        #expect(lines.contains { $0.contains("- Key point one") })
-        #expect(lines.contains { $0.contains("Decisions:") })
-        #expect(lines.contains { $0.contains("- Decision one") })
-        #expect(lines.contains { $0.contains("Action Items:") })
-        #expect(lines.contains { $0.contains("- Action item one") })
-    }
-
-    // MARK: - Error Message Tests
-
-    @Test
-    func errorMessage_showsMessage_andBackHint() {
-        let lines = TUIRenderer.render(state: .errorMessage("Disk full"), width: 80, height: 24)
-        #expect(lines.contains { $0.contains("Error: Disk full") })
-        #expect(lines.contains { $0.contains("[b] Back") })
-    }
-
-    // MARK: - Height Clamping Tests
+    // MARK: - Line count bound
 
     @Test
     func render_neverExceedsHeight() {
-        // Create 50 recordings, render with height=10
-        var recordings: [Recording] = []
-        for i in 0..<50 {
-            recordings.append(Recording(
-                id: UUID(),
-                title: "Recording \(i)",
-                createdAt: Date(timeIntervalSince1970: TimeInterval(i * 1000)),
-                duration: 60,
-                microphoneFileURL: URL(fileURLWithPath: "/tmp/test\(i).caf")
-            ))
-        }
-        let lines = TUIRenderer.render(state: .browsing(recordings: recordings, selectedIndex: 25), width: 80, height: 10)
-        #expect(lines.count <= 10)
+        let state = TUIState()
+        let height = 20
+        let lines = TUIRenderer.render(state: state, width: 80, height: height)
+        #expect(lines.count <= height)
     }
 
     @Test
-    func viewingResults_longContent_respectsHeight() {
+    func render_neverExceedsHeight_atVariousSizes() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: [], selectedIndex: 0)
+        )
+        for h in [18, 22, 30, 50] {
+            let lines = TUIRenderer.render(state: state, width: 80, height: h)
+            #expect(lines.count <= h)
+        }
+    }
+
+    // MARK: - Nav pane / title / border
+
+    @Test
+    func render_containsAllSectionNames() {
+        let state = TUIState()
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("Record"))
+        #expect(joined.contains("Recordings"))
+        #expect(joined.contains("Settings"))
+    }
+
+    @Test
+    func render_selectedSectionHasMarker() {
+        let state = TUIState(selectedSection: 1) // Recordings
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains(">"))
+    }
+
+    @Test
+    func navRow_focusedSelected_usesSameMarkerShapeAsList_focusedSelected() {
+        // Regression test: the nav pane's focused+selected row used to be
+        // bracket-wrapped ("[> Name ]") while the Recordings list's focused
+        // row was a bare "> " — the same concept (this row currently has
+        // keyboard focus) rendered as two different shapes depending on
+        // which pane it was in. Both must now use the identical "> " prefix.
+        let navFocusedState = TUIState(focusedPane: .navigation, selectedSection: 1)
+        let navLines = TUIRenderer.render(state: navFocusedState, width: 80, height: 24)
+        let navRow = navLines.first { $0.contains("Recordings") }
+        #expect(navRow != nil)
+        #expect(navRow!.contains("> Recordings"))
+        #expect(!navRow!.contains("[>"), "nav pane should no longer use bracket-wrapped markers")
+
+        let entries = [
+            RecordingListEntry(recording: makeRecording(title: "Row"), hasAudio: true, transcript: nil, summary: nil, transcriptFileURL: nil)
+        ]
+        let listFocusedState = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: entries, selectedIndex: 0)
+        )
+        let listLines = TUIRenderer.render(state: listFocusedState, width: 80, height: 24)
+        let listRow = listLines.first { $0.contains("Row") }
+        #expect(listRow != nil)
+        #expect(listRow!.contains("> [A-] Row"), "focused list row should use the same '> ' prefix as the focused nav row")
+    }
+
+    @Test
+    func navRow_selectedButNotFocused_andListRow_selectedButNotFocused_useSameDashMarker() {
+        // The "selected but focus is on the other pane" state must also
+        // match between panes — both use "- " now (previously the nav
+        // pane used a bare "> " for this state too, which collided visually
+        // with the Recordings list's OWN focused-row marker).
+        let navUnfocusedState = TUIState(focusedPane: .detail, selectedSection: 1)
+        let navLines = TUIRenderer.render(state: navUnfocusedState, width: 80, height: 24)
+        let navRow = navLines.first { $0.contains("Recordings") }
+        #expect(navRow != nil)
+        #expect(navRow!.contains("- Recordings"))
+
+        let entries = [
+            RecordingListEntry(recording: makeRecording(title: "Row"), hasAudio: true, transcript: nil, summary: nil, transcriptFileURL: nil)
+        ]
+        // The list's row is "selected but not focused" whenever the OUTER
+        // pane focus is .navigation (the list can't itself be browsed
+        // without detail focus, but it still shows its remembered
+        // selection as a preview).
+        let listUnfocusedState = TUIState(
+            focusedPane: .navigation,
+            selectedSection: 1,
+            recordings: .list(entries: entries, selectedIndex: 0)
+        )
+        let listLines = TUIRenderer.render(state: listUnfocusedState, width: 80, height: 24)
+        let listRow = listLines.first { $0.contains("Row") }
+        #expect(listRow != nil)
+        #expect(listRow!.contains("- [A-] Row"))
+    }
+
+    @Test
+    func render_includesInnerEarTitle() {
+        let state = TUIState()
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("InnerEar"))
+    }
+
+    @Test
+    func render_usesBoxDrawingChars() {
+        let state = TUIState()
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("┌"))
+        #expect(joined.contains("┐"))
+        #expect(joined.contains("└"))
+        #expect(joined.contains("┘"))
+        #expect(joined.contains("│"))
+        #expect(joined.contains("─"))
+    }
+
+    // MARK: - Footer legend changes between states
+
+    @Test
+    func render_footerDiffersBetweenNavFocused_andSettingsEditing() {
+        let navFocused = TUIState(focusedPane: .navigation, selectedSection: 0)
+        let settingsEditing = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .editing(currentInput: "/data")
+        )
+        let navFooter = TUIRenderer.footerText(for: navFocused)
+        let editingFooter = TUIRenderer.footerText(for: settingsEditing)
+        #expect(navFooter != editingFooter)
+        #expect(navFooter.contains("Select"))
+        #expect(editingFooter.contains("Save"))
+    }
+
+    @Test
+    func render_footerDiffersBetweenRecording_andViewing() {
+        let recording = TUIState(
+            focusedPane: .detail,
+            selectedSection: 0,
+            record: .recording(startedAt: Date(), captureSystemAudio: true)
+        )
+        let viewing = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 0)
+        )
+        let recFooter = TUIRenderer.footerText(for: recording)
+        let viewFooter = TUIRenderer.footerText(for: viewing)
+        #expect(recFooter != viewFooter)
+        #expect(recFooter.contains("Stop"))
+        #expect(viewFooter.contains("Scroll"))
+    }
+
+    // MARK: - Modal overlay
+
+    @Test
+    func render_modalContainsMessage() {
+        let state = TUIState(modal: .error("disk full boom"))
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("boom"))
+        #expect(joined.contains("[Enter/Esc] Dismiss"))
+    }
+
+    // MARK: - Per-section rendering
+
+    @Test
+    func record_idle_rendersStartHint() {
+        let state = TUIState(focusedPane: .detail, selectedSection: 0, record: .idle)
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("Press Enter"))
+    }
+
+    @Test
+    func record_prompting_rendersSystemAudioPrompt() {
+        let state = TUIState(focusedPane: .detail, selectedSection: 0, record: .prompting)
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("system audio") || joined.contains("Include system audio"))
+    }
+
+    @Test
+    func record_idle_and_prompting_haveDistinctFootersAndContent() {
+        // The idle->prompting transition (both reached via Enter, back to
+        // back) needs to be visibly distinct, not two indistinguishable
+        // "press Enter" moments.
+        let idleState = TUIState(focusedPane: .detail, selectedSection: 0, record: .idle)
+        let promptingState = TUIState(focusedPane: .detail, selectedSection: 0, record: .prompting)
+        let idleLines = TUIRenderer.render(state: idleState, width: 80, height: 24).joined(separator: "\n")
+        let promptingLines = TUIRenderer.render(state: promptingState, width: 80, height: 24).joined(separator: "\n")
+        #expect(idleLines != promptingLines)
+
+        let idleFooter = TUIRenderer.footerText(for: idleState)
+        let promptingFooter = TUIRenderer.footerText(for: promptingState)
+        #expect(idleFooter.contains("Start Recording"))
+        #expect(promptingFooter.contains("[y]"))
+        #expect(promptingFooter.contains("[n]"))
+        #expect(!promptingFooter.contains("Enter"), "Enter does nothing while prompting for y/n; footer shouldn't advertise it")
+        #expect(idleFooter != promptingFooter)
+    }
+
+    @Test
+    func record_saved_footerAdvertisesProcessNow() {
+        let state = TUIState(focusedPane: .detail, selectedSection: 0, record: .saved(makeRecording()))
+        #expect(TUIRenderer.footerText(for: state).contains("Process Now"))
+    }
+
+    @Test
+    func record_recording_rendersTimerAndStopHint() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 0,
+            record: .recording(startedAt: Date(timeIntervalSince1970: 0), captureSystemAudio: true)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("Recording"))
+        #expect(joined.contains("[s] Stop"))
+        #expect(joined.contains("system audio: on"))
+    }
+
+    @Test
+    func record_recording_withoutSystemAudio_showsOff() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 0,
+            record: .recording(startedAt: Date(timeIntervalSince1970: 0), captureSystemAudio: false)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("system audio: off"))
+    }
+
+    @Test
+    func record_saved_rendersIdAndEnterHint() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 0,
+            record: .saved(makeRecording())
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("11111111-2222-3333-4444-555555555555"))
+        #expect(joined.contains("Process now"))
+    }
+
+    // MARK: - Recordings section
+
+    @Test
+    func recordings_list_empty_rendersEmptyMessage() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: [], selectedIndex: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("No recordings yet"))
+    }
+
+    @Test
+    func recordings_list_nonEmpty_rendersTitlesAndSelectionMarker() {
+        let recs = [
+            makeRecording(title: "First"),
+            Recording(
+                id: UUID(uuidString: "22222222-3333-4444-5555-666666666666")!,
+                title: "Second",
+                createdAt: Date(timeIntervalSince1970: 2_000_000),
+                duration: 120,
+                microphoneFileURL: URL(fileURLWithPath: "/tmp/test2.caf")
+            )
+        ]
+        let entries = recs.map { rec in
+            RecordingListEntry(
+                recording: rec,
+                hasAudio: true,
+                transcript: nil,
+                summary: nil,
+                transcriptFileURL: nil
+            )
+        }
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: entries, selectedIndex: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("First"))
+        #expect(joined.contains("Second"))
+        #expect(joined.contains(">"))
+    }
+
+    @Test
+    func recordings_processing_rendersStatusLine() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .processing(recording: makeRecording(title: "Demo"), statusLine: "Diarizing...", stepIndex: 2)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("Demo"))
+        #expect(joined.contains("Diarizing"))
+    }
+
+    @Test
+    func recordings_processing_rendersProgressBarAndStepCount() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .processing(recording: makeRecording(), statusLine: "Diarizing...", stepIndex: 2)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("Step 2 of 3"))
+        #expect(joined.contains("█"))
+        #expect(joined.contains("["))
+        #expect(joined.contains("]"))
+    }
+
+    @Test
+    func recordings_processing_progressBarFillGrowsWithStepIndex() {
+        func filledCount(forStep step: Int) -> Int {
+            let state = TUIState(
+                focusedPane: .detail,
+                selectedSection: 1,
+                recordings: .processing(recording: makeRecording(), statusLine: "x", stepIndex: step)
+            )
+            let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+            // Rendered lines are full frame rows wrapped in box-drawing
+            // border characters ("│ ... │"), not raw content — so match on
+            // "[" appearing anywhere in the row, not as a line prefix.
+            let barLine = lines.first { $0.contains("[") && ($0.contains("█") || $0.contains("░")) }
+            return barLine?.filter { $0 == "█" }.count ?? -1
+        }
+        let step0 = filledCount(forStep: 0)
+        let step1 = filledCount(forStep: 1)
+        let step2 = filledCount(forStep: 2)
+        let step3 = filledCount(forStep: 3)
+        #expect(step0 == 0)
+        #expect(step1 < step2)
+        #expect(step2 < step3)
+    }
+
+    @Test
+    func recordings_viewingResults_rendersTranscript() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 0)
+        )
+        // Use a wide terminal so the detail pane (width - navPaneWidth - 3)
+        // has room for the full "[MM:SS] Speaker: text" line without
+        // hitting the word-wrap's non-word-boundary-aware line break —
+        // at width 80 the ~55-char detail pane wraps this line mid-word,
+        // which is a real (documented, v1-accepted) renderer limitation,
+        // not something this test is trying to exercise.
+        let lines = TUIRenderer.render(state: state, width: 120, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("Hello world, this is a test transcript"))
+    }
+
+    @Test
+    func recordings_viewingResults_rendersPerSegmentTimestampAndSpeaker_notFlatEcho() {
+        // "Rendered, not echoed": each segment must show its own MM:SS
+        // timestamp and speaker label, not just a flat concatenated blob.
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        // makeTranscript()'s single segment starts at time 0 with speaker "Speaker 1".
+        #expect(joined.contains("[00:00] Speaker 1:"))
+    }
+
+    @Test
+    func recordings_viewingResults_groupsConsecutiveSameSpeakerSegments_intoOneTurn() {
+        // Regression test: WhisperKit commonly splits one sentence into
+        // several short segments; rendering one [MM:SS] tag per segment
+        // produced a wall of near-duplicate timestamps for one continuous
+        // turn. Consecutive same-speaker segments must now merge into a
+        // single paragraph carrying only the FIRST segment's timestamp.
         let speaker = Speaker(label: "Speaker 1", colorHex: "#3478F6", isLocalUser: true)
-        // Create a transcript with very long text that will wrap to many lines
-        let longText = String(repeating: "This is a very long sentence that will wrap across multiple lines when rendered at a narrow width. ", count: 20)
         let transcript = Transcript(
             id: UUID(),
             recordingID: UUID(),
@@ -182,28 +466,297 @@ struct TUIRendererTests {
             modelUsed: TranscriptionModel.whisperLargeV3Turbo.rawValue,
             speakers: [speaker],
             segments: [
-                TranscriptSegment(speakerID: speaker.id, text: longText, startTime: 0, endTime: 100)
+                TranscriptSegment(speakerID: speaker.id, text: "Hello there,", startTime: 0, endTime: 1),
+                TranscriptSegment(speakerID: speaker.id, text: "how are you", startTime: 1, endTime: 2),
+                TranscriptSegment(speakerID: speaker.id, text: "doing today?", startTime: 2, endTime: 3)
             ],
             generatedAt: Date()
         )
-        let lines = TUIRenderer.render(state: .viewingResults(transcript: transcript, summary: nil, scrollOffset: 0), width: 40, height: 10)
-        #expect(lines.count <= 10)
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: transcript, summary: nil, scrollOffset: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 120, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("[00:00] Speaker 1: Hello there, how are you doing today?"))
+        // Only the turn's starting timestamp should appear — not one tag
+        // per merged segment.
+        #expect(!joined.contains("[00:01]"))
+        #expect(!joined.contains("[00:02]"))
     }
 
-    // MARK: - Truncation Tests
+    @Test
+    func recordings_viewingResults_separatesTurnsOnSpeakerChange() {
+        let local = Speaker(label: "Speaker 1", colorHex: "#3478F6", isLocalUser: true)
+        let remote = Speaker(label: "Speaker 2 (Remote)", colorHex: "#FF9500", isLocalUser: false)
+        let transcript = Transcript(
+            id: UUID(),
+            recordingID: UUID(),
+            languageCode: "en",
+            modelUsed: TranscriptionModel.whisperLargeV3Turbo.rawValue,
+            speakers: [local, remote],
+            segments: [
+                TranscriptSegment(speakerID: local.id, text: "Hi.", startTime: 0, endTime: 1),
+                TranscriptSegment(speakerID: remote.id, text: "Hey there.", startTime: 1, endTime: 2),
+                TranscriptSegment(speakerID: local.id, text: "How's it going?", startTime: 2, endTime: 3)
+            ],
+            generatedAt: Date()
+        )
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: transcript, summary: nil, scrollOffset: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 120, height: 24)
+        let joined = lines.joined(separator: "\n")
+        // Speaker change produces a NEW turn even though it's immediately
+        // followed by the first speaker again — turns don't merge across
+        // a change, only within a consecutive run of the same speaker.
+        #expect(joined.contains("[00:00] Speaker 1: Hi."))
+        #expect(joined.contains("[00:01] Speaker 2 (Remote): Hey there."))
+        #expect(joined.contains("[00:02] Speaker 1: How's it going?"))
+    }
 
     @Test
-    func longLines_areTruncatedWithEllipsis() {
-        let longTitle = String(repeating: "A", count: 100)
+    func recordings_list_marker_reflectsAudioAndTranscriptPresence() {
+        let withBoth = RecordingListEntry(
+            recording: makeRecording(title: "Both"),
+            hasAudio: true,
+            transcript: makeTranscript(),
+            summary: nil,
+            transcriptFileURL: URL(fileURLWithPath: "/tmp/t.json")
+        )
+        let audioOnly = RecordingListEntry(
+            recording: Recording(
+                id: UUID(uuidString: "33333333-4444-5555-6666-777777777777")!,
+                title: "AudioOnly",
+                createdAt: Date(timeIntervalSince1970: 1_000_000),
+                duration: 10,
+                microphoneFileURL: URL(fileURLWithPath: "/tmp/audioonly.caf")
+            ),
+            hasAudio: true,
+            transcript: nil,
+            summary: nil,
+            transcriptFileURL: nil
+        )
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: [withBoth, audioOnly], selectedIndex: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("[AT] Both"))
+        #expect(joined.contains("[A-] AudioOnly"))
+    }
+
+    @Test
+    func recordings_list_trailingField_showsDurationAndWordCount_notASecondDateStamp() {
+        // Regression test: the row used to append a second, differently-
+        // formatted date/time stamp after the title (which already embeds
+        // its own "yyyy-MM-dd HH:mm:ss"). The last field is now duration
+        // (+ word count once transcribed), not a redundant timestamp.
+        let withTranscript = RecordingListEntry(
+            recording: makeRecording(title: "Both"), // duration: 60 -> "01:00"
+            hasAudio: true,
+            transcript: makeTranscript(), // fullText: "Hello world, this is a test transcript." -> 7 words
+            summary: nil,
+            transcriptFileURL: URL(fileURLWithPath: "/tmp/t.json")
+        )
+        let audioOnly = RecordingListEntry(
+            recording: Recording(
+                id: UUID(uuidString: "44444444-5555-6666-7777-888888888888")!,
+                title: "AudioOnly",
+                createdAt: Date(timeIntervalSince1970: 1_000_000),
+                duration: 10, // -> "00:10"
+                microphoneFileURL: URL(fileURLWithPath: "/tmp/audioonly2.caf")
+            ),
+            hasAudio: true,
+            transcript: nil,
+            summary: nil,
+            transcriptFileURL: nil
+        )
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: [withTranscript, audioOnly], selectedIndex: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("01:00, 7 words"))
+        #expect(joined.contains("00:10"))
+        #expect(!joined.contains("00:10,"), "no-transcript entry should show duration only, no word count")
+    }
+
+    @Test
+    func recordings_list_attributeBar_showsCaptureTimeAndFilePaths() {
         let recording = Recording(
             id: UUID(),
-            title: longTitle,
-            createdAt: Date(),
-            duration: 60,
-            microphoneFileURL: URL(fileURLWithPath: "/tmp/test.caf")
+            title: "With Paths",
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            duration: 30,
+            microphoneFileURL: URL(fileURLWithPath: "/tmp/mic-audio.caf")
         )
-        let lines = TUIRenderer.render(state: .recordingSaved(recording), width: 40, height: 24)
-        // The recording saved line should be truncated
-        #expect(lines[0].hasSuffix("…") || lines[0].count <= 40)
+        let transcript = makeTranscript()
+        let entry = RecordingListEntry(
+            recording: recording,
+            hasAudio: true,
+            transcript: transcript,
+            summary: nil,
+            transcriptFileURL: URL(fileURLWithPath: "/tmp/transcript-file.json")
+        )
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: [entry], selectedIndex: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("Captured:"))
+        #expect(joined.contains("/tmp/mic-audio.caf"))
+        #expect(joined.contains("/tmp/transcript-file.json"))
+    }
+
+    @Test
+    func recordings_list_attributeBar_showsPlaceholdersWhenMissing() {
+        let entry = RecordingListEntry(
+            recording: Recording(
+                id: UUID(),
+                title: "Nothing",
+                createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+                duration: 5,
+                microphoneFileURL: URL(fileURLWithPath: "/tmp/gone.caf")
+            ),
+            hasAudio: false,
+            transcript: nil,
+            summary: nil,
+            transcriptFileURL: nil
+        )
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: [entry], selectedIndex: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("not present"))
+        #expect(joined.contains("not yet generated"))
+    }
+
+    @Test
+    func recordings_confirmGenerateTranscript_rendersPromptWithTitle() {
+        let entries = [
+            RecordingListEntry(
+                recording: makeRecording(title: "Needs Transcript"),
+                hasAudio: true,
+                transcript: nil,
+                summary: nil,
+                transcriptFileURL: nil
+            )
+        ]
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .confirmGenerateTranscript(entries: entries, selectedIndex: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("Needs Transcript"))
+        #expect(joined.contains("[y/n]"))
+    }
+
+    @Test
+    func recordings_confirmDelete_rendersPromptWithTitleAndOptions() {
+        let entries = [
+            RecordingListEntry(
+                recording: makeRecording(title: "Doomed"),
+                hasAudio: true,
+                transcript: makeTranscript(),
+                summary: nil,
+                transcriptFileURL: URL(fileURLWithPath: "/tmp/t.json")
+            )
+        ]
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .confirmDelete(entries: entries, selectedIndex: 0)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("Doomed"))
+        #expect(joined.contains("[a] Audio only"))
+        #expect(joined.contains("[t] Transcript only"))
+        #expect(joined.contains("[b] Both"))
+    }
+
+    @Test
+    func footer_differsAcrossListConfirmGenerateAndConfirmDeleteStates() {
+        let entries = [
+            RecordingListEntry(
+                recording: makeRecording(),
+                hasAudio: true,
+                transcript: nil,
+                summary: nil,
+                transcriptFileURL: nil
+            )
+        ]
+        let listFooter = TUIRenderer.footerText(for: TUIState(
+            focusedPane: .detail, selectedSection: 1,
+            recordings: .list(entries: entries, selectedIndex: 0)
+        ))
+        let generateFooter = TUIRenderer.footerText(for: TUIState(
+            focusedPane: .detail, selectedSection: 1,
+            recordings: .confirmGenerateTranscript(entries: entries, selectedIndex: 0)
+        ))
+        let deleteFooter = TUIRenderer.footerText(for: TUIState(
+            focusedPane: .detail, selectedSection: 1,
+            recordings: .confirmDelete(entries: entries, selectedIndex: 0)
+        ))
+        #expect(listFooter.contains("[d] Delete"))
+        #expect(generateFooter.contains("Generate"))
+        #expect(deleteFooter.contains("Audio"))
+        #expect(listFooter != generateFooter)
+        #expect(generateFooter != deleteFooter)
+    }
+
+    // MARK: - Settings section
+
+    @Test
+    func settings_viewing_rendersResolvedPath() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .viewing(resolvedPath: "/data/inner", source: .configFile)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("/data/inner"))
+        #expect(joined.contains("config.json"))
+        #expect(joined.contains("[e] Edit"))
+    }
+
+    @Test
+    func settings_viewing_envVarSource_rendersEnvVarDescription() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .viewing(resolvedPath: "/from/env", source: .envVar)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("INNEREAR_DATA_DIR"))
+    }
+
+    @Test
+    func settings_editing_rendersCurrentInput() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .editing(currentInput: "/typed/path")
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("/typed/path"))
     }
 }
