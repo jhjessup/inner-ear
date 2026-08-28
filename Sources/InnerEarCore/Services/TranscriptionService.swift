@@ -19,10 +19,22 @@ public enum TranscriptionError: Error, Equatable, Sendable {
 public protocol TranscriptionService: AnyObject, Sendable {
     /// Transcribe the given recording's microphone (and, if present, system
     /// audio) files using `model`. `languageCode` is nil for auto-detection.
+    ///
+    /// `progressHandler` is an optional live-progress callback. When non-nil,
+    /// implementations should invoke it from their underlying engine's own
+    /// progress hook (e.g. WhisperKit's `TranscriptionCallback`) with a
+    /// running, monotonically-nondecreasing WORD COUNT (not a percentage —
+    /// most on-device engines do not expose a fraction-complete value, only
+    /// accumulating decoded text/tokens). The callback may be invoked many
+    /// times per second and from arbitrary threads; it must be safe to call
+    /// from any thread and must not assume actor isolation. Callers that
+    /// don't need live progress should pass `nil` (or use the convenience
+    /// 3-argument overload below).
     func transcribe(
         recording: Recording,
         model: TranscriptionModel,
-        languageCode: String?
+        languageCode: String?,
+        progressHandler: (@Sendable (Int) -> Void)?
     ) async throws -> Transcript
 
     /// Re-run transcription on an existing recording with a different model,
@@ -32,4 +44,19 @@ public protocol TranscriptionService: AnyObject, Sendable {
         model: TranscriptionModel,
         preserveSpeakers: Bool
     ) async throws -> Transcript
+}
+
+extension TranscriptionService {
+    /// Convenience overload for callers that don't need live progress — this
+    /// is what makes the existing 3-argument call sites (ChannelBasedDiarizationService,
+    /// TranscribeCommand) keep compiling unchanged. `progressHandler` reports a
+    /// running WORD COUNT (not a percentage — WhisperKit's own callback doesn't
+    /// expose a fraction-complete value, only accumulating decoded text/tokens).
+    public func transcribe(
+        recording: Recording,
+        model: TranscriptionModel,
+        languageCode: String?
+    ) async throws -> Transcript {
+        try await transcribe(recording: recording, model: model, languageCode: languageCode, progressHandler: nil)
+    }
 }

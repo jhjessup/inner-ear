@@ -110,10 +110,32 @@ enum TUIRunLoop {
                             // Transcribe
                             state.recordings = .processing(recording: recording, statusLine: "Transcribing...", stepIndex: 1)
                             renderNow()
+                            let progressThrottle = ProgressRenderThrottle(minInterval: 0.2)
                             let transcript = try await transcription.transcribe(
                                 recording: recording,
                                 model: .whisperLargeV3Turbo,
-                                languageCode: nil
+                                languageCode: nil,
+                                progressHandler: { wordCount in
+                                    // Runs on whatever thread WhisperKit calls it from — must
+                                    // NOT touch the outer `state` var (that would be a data
+                                    // race the compiler can't verify is safe). Build a fresh,
+                                    // self-contained TUIState instead; terminalSize()/
+                                    // TUIRenderer.render/writeToTerminal are all pure/free
+                                    // functions with no shared mutable captures, so this is safe.
+                                    guard progressThrottle.shouldRenderNow() else { return }
+                                    let liveState = TUIState(
+                                        focusedPane: .detail,
+                                        selectedSection: 1,
+                                        recordings: .processing(
+                                            recording: recording,
+                                            statusLine: "Transcribing... (\(wordCount) words so far)",
+                                            stepIndex: 1
+                                        )
+                                    )
+                                    let size = terminalSize()
+                                    let lines = TUIRenderer.render(state: liveState, width: size.width, height: size.height)
+                                    writeToTerminal(lines)
+                                }
                             )
 
                             // Diarize
@@ -321,6 +343,33 @@ enum TUIRunLoop {
         if !hasAudio && !hasTranscript {
             try? store.deleteRecordingCatalogEntry(recordingID)
         }
+    }
+}
+
+/// Rate-limits how often the live transcription-progress callback is
+/// allowed to trigger a terminal redraw. WhisperKit's callback can fire
+/// many times per second from an arbitrary thread — without this, that
+/// would cause excessive/flickery redraws far faster than this app's
+/// normal ~150ms render pacing. `@unchecked Sendable` + `NSLock` (not an
+/// actor) because the callback that calls `shouldRenderNow()` is a plain
+/// synchronous `@Sendable` closure, not `async` — it cannot `await` into
+/// an actor.
+private final class ProgressRenderThrottle: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lastRenderAt: Date = .distantPast
+    private let minInterval: TimeInterval
+
+    init(minInterval: TimeInterval) {
+        self.minInterval = minInterval
+    }
+
+    func shouldRenderNow() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let now = Date()
+        guard now.timeIntervalSince(lastRenderAt) >= minInterval else { return false }
+        lastRenderAt = now
+        return true
     }
 }
 
