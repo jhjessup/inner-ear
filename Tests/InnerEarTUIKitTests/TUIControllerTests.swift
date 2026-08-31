@@ -100,6 +100,88 @@ struct TUIControllerTests {
         #expect(effects.isEmpty)
     }
 
+    // MARK: - Left/Right arrows switch focused pane
+
+    @Test
+    func rightArrow_navigationFocused_section0_movesToDetail_noEffects() {
+        let state = TUIState(focusedPane: .navigation, selectedSection: 0)
+        let (nextState, effects) = TUIController.reduce(state, .key(TUIController.rightArrowKey))
+        #expect(nextState.focusedPane == .detail)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func rightArrow_navigationFocused_section1_movesToDetail_andLoadsRecordings() {
+        // Right arrow reuses the exact Enter-in-nav-pane transition (not a
+        // bare focus flip like Tab) because Recordings/Settings only
+        // populate their detail pane via this load effect.
+        let state = TUIState(focusedPane: .navigation, selectedSection: 1)
+        let (nextState, effects) = TUIController.reduce(state, .key(TUIController.rightArrowKey))
+        #expect(nextState.focusedPane == .detail)
+        #expect(effects == [.loadRecordings])
+    }
+
+    @Test
+    func rightArrow_navigationFocused_section2_movesToDetail_andLoadsConfigStatus() {
+        let state = TUIState(focusedPane: .navigation, selectedSection: 2)
+        let (nextState, effects) = TUIController.reduce(state, .key(TUIController.rightArrowKey))
+        #expect(nextState.focusedPane == .detail)
+        #expect(effects == [.loadConfigStatus])
+    }
+
+    @Test
+    func rightArrow_detailFocused_isNoOp() {
+        let state = TUIState(focusedPane: .detail, selectedSection: 0)
+        let (nextState, effects) = TUIController.reduce(state, .key(TUIController.rightArrowKey))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func leftArrow_detailFocused_movesToNavigation_noEffects() {
+        let state = TUIState(focusedPane: .detail, selectedSection: 1)
+        let (nextState, effects) = TUIController.reduce(state, .key(TUIController.leftArrowKey))
+        #expect(nextState.focusedPane == .navigation)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func leftArrow_navigationFocused_isNoOp() {
+        let state = TUIState(focusedPane: .navigation, selectedSection: 0)
+        let (nextState, effects) = TUIController.reduce(state, .key(TUIController.leftArrowKey))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func leftArrow_duringActiveRecording_isSwallowed() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 0,
+            record: .recording(startedAt: Date(), captureSystemAudio: true)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key(TUIController.leftArrowKey))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func leftArrow_doesNotShadowLiteralTypedText_duringSettingsEditing() {
+        // The whole reason Left/Right use PUA sentinels instead of reusing
+        // 'h'/'l' the way Up/Down reuse 'k'/'j': a real 'h' or 'l' keypress
+        // while editing the data-directory path must still append that
+        // literal character, not get hijacked as a pane switch.
+        let state = TUIState(focusedPane: .detail, selectedSection: 2, settings: .editing(currentInput: "/data"))
+        let (nextState, effects) = TUIController.reduce(state, .key("h"))
+        if case .editing(let input) = nextState.settings {
+            #expect(input == "/datah")
+        } else {
+            Issue.record("expected .editing state to persist")
+        }
+        #expect(nextState.focusedPane == .detail)
+        #expect(effects.isEmpty)
+    }
+
     // MARK: - Nav-pane j/k clamping
 
     @Test
@@ -836,6 +918,73 @@ struct TUIControllerTests {
         let (nextState, _) = TUIController.reduce(state, .key("k"))
         if case .viewingResults(_, _, let offset) = nextState.recordings {
             #expect(offset == 0)
+        } else {
+            #expect(Bool(false))
+        }
+    }
+
+    @Test
+    func recordings_viewingResults_space_pagesForward() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 5)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key(" "))
+        if case .viewingResults(_, _, let offset) = nextState.recordings {
+            #expect(offset == 15)
+        } else {
+            #expect(Bool(false))
+        }
+    }
+
+    @Test
+    func recordings_viewingResults_b_pagesBackward_clampsAtZero() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 5)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key("b"))
+        if case .viewingResults(_, _, let offset) = nextState.recordings {
+            #expect(offset == 0)
+        } else {
+            #expect(Bool(false))
+        }
+    }
+
+    @Test
+    func recordings_viewingResults_g_jumpsToTop() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 42)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key("g"))
+        if case .viewingResults(_, _, let offset) = nextState.recordings {
+            #expect(offset == 0)
+        } else {
+            #expect(Bool(false))
+        }
+    }
+
+    @Test
+    func recordings_viewingResults_G_jumpsPastEnd_andSubsequentJDoesNotOverflow() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 0)
+        )
+        let (bottomState, _) = TUIController.reduce(state, .key("G"))
+        guard case .viewingResults(_, _, let bottomOffset) = bottomState.recordings else {
+            #expect(Bool(false))
+            return
+        }
+        #expect(bottomOffset > 1_000_000)
+
+        let (nextState, _) = TUIController.reduce(bottomState, .key("j"))
+        if case .viewingResults(_, _, let offset) = nextState.recordings {
+            #expect(offset == bottomOffset + 1)
         } else {
             #expect(Bool(false))
         }

@@ -222,7 +222,7 @@ struct TUIRendererTests {
         let viewFooter = TUIRenderer.footerText(for: viewing)
         #expect(recFooter != viewFooter)
         #expect(recFooter.contains("Stop"))
-        #expect(viewFooter.contains("Scroll"))
+        #expect(viewFooter.contains("Page"))
     }
 
     // MARK: - Modal overlay
