@@ -179,15 +179,29 @@ func rawTerminalWrite(_ s: String) {
     }
 }
 
-/// Write an array of lines to the terminal, clearing the screen first.
-/// Lines are joined with `\r\n` (a separator, not a terminator) because
-/// the terminal is in raw mode. Deliberately no trailing `\r\n` after the
-/// last line: the multipane renderer always emits exactly `height` lines,
-/// so a trailing newline would move the cursor past the bottom row and
-/// force the terminal to scroll on every single redraw — even inside the
-/// alternate screen buffer, this reliably leaked frames into scrollback.
+/// Write an array of lines to the terminal, redrawing the existing frame
+/// in place. Lines are joined with `\r\n` (a separator, not a terminator)
+/// because the terminal is in raw mode. Deliberately no trailing `\r\n`
+/// after the last line: the multipane renderer always emits exactly
+/// `height` lines, so a trailing newline would move the cursor past the
+/// bottom row and force the terminal to scroll on every single redraw —
+/// even inside the alternate screen buffer, this reliably leaked frames
+/// into scrollback.
+///
+/// Deliberately does NOT emit `ESC[2J` (clear entire screen) before
+/// redrawing. A full clear blanks every cell for one frame before the new
+/// content lands, and that blank-then-redraw flash is what many terminal
+/// emulators render as a visible jump/scroll on every update, even though
+/// no actual scrolling happens in the alternate buffer. The renderer
+/// already pads every line to exactly `width` columns and emits exactly
+/// `height` rows, so moving the cursor home (`ESC[H`) and overwriting each
+/// cell with new content is sufficient — nothing is left over from the
+/// previous frame. `ESC[J` (clear from cursor to end of screen) after the
+/// last line only matters immediately after a resize to a shorter frame,
+/// where a stale row from the previous, larger frame could otherwise
+/// survive below the new content.
 func writeToTerminal(_ lines: [String]) {
-    let output = "\u{1B}[2J\u{1B}[H" + lines.joined(separator: "\r\n")
+    let output = "\u{1B}[H" + lines.joined(separator: "\r\n") + "\u{1B}[J"
     rawTerminalWrite(output)
 }
 

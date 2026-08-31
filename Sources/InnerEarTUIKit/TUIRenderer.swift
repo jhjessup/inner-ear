@@ -231,7 +231,8 @@ public enum TUIRenderer {
             return [
                 "Recording saved: \(recording.id.uuidString)",
                 "",
-                "[Enter] Process now"
+                "[Enter] Process now",
+                "[Esc]   Defer — audio is already saved; transcribe later from Recordings"
             ]
         }
     }
@@ -563,7 +564,7 @@ public enum TUIRenderer {
                 // Enter does nothing here — y/n do — so don't advertise it.
                 return "[y] Yes  [n] No  [Esc] Cancel"
             case .saved:
-                return "[Enter] Process Now  [Tab] Nav  [Esc] Back"
+                return "[Enter] Process Now  [Esc] Defer  [Tab] Nav"
             case .recording:
                 // Already covered above, but defensive.
                 return "[s]/[Esc] Stop"
