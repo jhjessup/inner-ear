@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import InnerEarTUIKit
 
 /// Raw terminal mode manager. Puts stdin into non-canonical, no-echo mode
 /// on init, and restores the original settings on `restore()` or `deinit`.
@@ -128,11 +129,13 @@ func readKeyNonBlocking() -> Character? {
 /// sequences (`ESC [ A/B/C/D`) and maps Up/Down to the same `'k'`/`'j'`
 /// characters the controller already treats as list-navigation keys — so
 /// no changes were needed in TUIController/TUIRenderer to support arrow
-/// keys. A bare Esc keypress (nothing, or something other than `[`,
-/// follows within this read cycle) is still returned as `"\u{1B}"`
-/// exactly as before. Left/Right arrows are consumed (so their bytes
-/// don't leak into the next frame as stray `'C'`/`'D'` characters) but
-/// produce no key, since this app has no horizontal-list semantics.
+/// keys. Left/Right map to `TUIController.leftArrowKey`/`.rightArrowKey`,
+/// dedicated Private-Use-Area sentinel characters (not reused letters like
+/// 'h'/'l') specifically so the controller can treat them as global,
+/// Tab-like pane-switch keys without ever colliding with literal typed
+/// text (see the case-3.5 comment in `TUIController.reduce(_:_:)`). A bare
+/// Esc keypress (nothing, or something other than `[`, follows within this
+/// read cycle) is still returned as `"\u{1B}"` exactly as before.
 func readKeyOrArrowNonBlocking() -> Character? {
     guard let first = readRawByteNonBlocking() else { return nil }
     guard first == 0x1B else {
@@ -163,7 +166,8 @@ func readKeyOrArrowNonBlocking() -> Character? {
     switch third {
     case UInt8(ascii: "A"): return "k"       // Up
     case UInt8(ascii: "B"): return "j"       // Down
-    case UInt8(ascii: "C"), UInt8(ascii: "D"): return nil // Left/Right: consumed, no mapping
+    case UInt8(ascii: "C"): return TUIController.rightArrowKey // Right
+    case UInt8(ascii: "D"): return TUIController.leftArrowKey  // Left
     default:
         return Character(UnicodeScalar(first)) // unrecognized sequence — treat as bare Esc
     }

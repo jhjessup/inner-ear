@@ -16,6 +16,30 @@ import InnerEarCore
 /// unchanged with no effects.
 public enum TUIController {
 
+    /// Sentinel characters `readKeyOrArrowNonBlocking()` (InnerEarCLI/TerminalIO.swift)
+    /// maps the Left/Right ANSI arrow-key escape sequences to. Chosen from the
+    /// Unicode Private Use Area specifically because no real keypress can ever
+    /// produce them, so they can be treated as global, Tab/Esc-like control
+    /// keys without any risk of shadowing literal typed text (see the case-3.5
+    /// comment in `reduce(_:_:)`). Public so `InnerEarCLI` can use the same
+    /// literals when emitting `.key` events.
+    public static let leftArrowKey: Character = "\u{E000}"
+    public static let rightArrowKey: Character = "\u{E001}"
+
+    /// Fixed step size for the transcript pager's space/b page-forward and
+    /// page-backward keys (see `.viewingResults` in `reduce(_:_:)`). The
+    /// reducer is pure and has no access to the terminal's actual height, so
+    /// this is a fixed approximation of "one screenful" rather than an exact
+    /// page — real pagers (less/more) size a page from the terminal height.
+    static let pagerPageStep = 10
+
+    /// Overflow-safe "scroll to bottom" sentinel for the transcript pager's
+    /// `G` key. Large enough that `renderRecordingsResults`'s render-time
+    /// clamp always treats it as "past the end" for any realistic
+    /// transcript, but far below `Int.max` so a later `j` press (scrollOffset
+    /// + 1) can never trap on overflow.
+    static let pagerBottomSentinel = 1_000_000_000
+
     /// Apply one event to the current state, returning the new state and any
     /// effects that the run loop should execute.
     ///
@@ -56,6 +80,31 @@ public enum TUIController {
         if key == "\t" {
             var s = state
             s.focusedPane = (state.focusedPane == .navigation) ? .detail : .navigation
+            return (s, [])
+        }
+
+        // 3.5. Left arrow always pulls focus back to the nav pane, mirroring
+        // Tab's "no effects, just flip focus" behavior — never destructive
+        // to the current section's sub-state (unlike Esc, which resets it).
+        // No-op if the nav pane is already focused. Right arrow's symmetric
+        // case is folded into case 5 below (see the comment there) because
+        // "enter the detail pane" and "open the selected nav item" are the
+        // same effect-triggering transition Enter already performs there.
+        //
+        // `leftArrowKey`/`rightArrowKey` are the Unicode Private-Use-Area
+        // sentinels `readKeyOrArrowNonBlocking()` (in InnerEarCLI/TerminalIO.swift)
+        // maps the Left/Right ANSI escape sequences to. Deliberately NOT
+        // reusing printable letters the way Up/Down reuse 'k'/'j' elsewhere
+        // in this file: 'k'/'j' are only ever interpreted inside specific
+        // list/scroll sub-states, but pane-switching needs to be a GLOBAL,
+        // Tab-like control key — and this project's data-directory path
+        // editor (Settings, case 2) accepts arbitrary printable text, which
+        // could easily contain 'h'/'l' (e.g. a path with "jhjessup" in it).
+        // A PUA codepoint can never arrive from a real keypress, so it's
+        // safe to treat as privileged without shadowing typed text.
+        if key == leftArrowKey, state.focusedPane == .detail {
+            var s = state
+            s.focusedPane = .navigation
             return (s, [])
         }
 
@@ -137,7 +186,11 @@ public enum TUIController {
                 var s = state
                 s.selectedSection = max(state.selectedSection - 1, 0)
                 return (s, [])
-            case "\r", "\n":
+            case "\r", "\n", rightArrowKey:
+                // Right arrow reuses this exact branch (rather than a plain
+                // focus flip like Tab/Left-arrow) because sections 1 and 2
+                // only populate their detail pane via these load effects —
+                // a bare focus flip would land on a stale/empty pane.
                 var s = state
                 s.focusedPane = .detail
                 switch state.selectedSection {
@@ -330,11 +383,17 @@ public enum TUIController {
             return (state, [])
 
         case .viewingResults(let transcript, let summary, let scrollOffset):
+            // Pager-style navigation (less(1)/more(1) conventions): j/k step
+            // one line, space/b page forward/backward, g/G jump to the
+            // top/bottom. None of these clamp upward here — same as the
+            // pre-existing j behavior, the renderer clamps against the real
+            // content height at render time (`clampedOffset` in
+            // `renderRecordingsResults`), since the reducer has no access to
+            // terminal size. `pagerPageStep` is therefore a fixed
+            // approximation of "one screenful," not an exact page height.
             switch key {
             case "j":
                 var s = state
-                // No clamping here — the renderer clamps against the
-                // content height at render time, same as the old TUI.
                 s.recordings = .viewingResults(
                     transcript: transcript,
                     summary: summary,
@@ -348,6 +407,35 @@ public enum TUIController {
                     summary: summary,
                     scrollOffset: max(scrollOffset - 1, 0)
                 )
+                return (s, [])
+            case " ":
+                var s = state
+                s.recordings = .viewingResults(
+                    transcript: transcript,
+                    summary: summary,
+                    scrollOffset: scrollOffset + Self.pagerPageStep
+                )
+                return (s, [])
+            case "b":
+                var s = state
+                s.recordings = .viewingResults(
+                    transcript: transcript,
+                    summary: summary,
+                    scrollOffset: max(scrollOffset - Self.pagerPageStep, 0)
+                )
+                return (s, [])
+            case "g":
+                var s = state
+                s.recordings = .viewingResults(transcript: transcript, summary: summary, scrollOffset: 0)
+                return (s, [])
+            case "G":
+                var s = state
+                // A large-but-overflow-safe sentinel, not Int.max: the
+                // renderer clamps it down to the real bottom at render time,
+                // but j/k arithmetic on `scrollOffset` elsewhere in this
+                // case must never risk an Int overflow trap if pressed again
+                // afterward.
+                s.recordings = .viewingResults(transcript: transcript, summary: summary, scrollOffset: Self.pagerBottomSentinel)
                 return (s, [])
             case "e":
                 return (state, [.exportResult(transcript: transcript, summary: summary, format: .markdown)])

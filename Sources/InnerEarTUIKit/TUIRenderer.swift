@@ -552,7 +552,7 @@ public enum TUIRenderer {
         }
         // Nav-pane focused.
         if state.focusedPane == .navigation {
-            return "[j/k] Select  [Enter] Open  [Tab] Detail  [q] Quit"
+            return "[j/k] Select  [->/Enter] Open  [Tab] Detail  [q] Quit"
         }
         // Detail-pane focused: dispatch on section.
         switch state.selectedSection {
@@ -578,7 +578,7 @@ public enum TUIRenderer {
             case .confirmDelete:
                 return "[a] Audio  [t] Transcript  [b] Both  [Esc] Cancel"
             case .viewingResults:
-                return "[j/k] Scroll  [e] Export  [Tab] Nav  [Esc] Back"
+                return "[j/k] Line  [space/b] Page  [g/G] Top/Bottom  [e] Export  [<-] Nav  [Esc] Back"
             case .processing:
                 return "[Tab] Nav"
             }
