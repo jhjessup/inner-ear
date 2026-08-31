@@ -26,6 +26,21 @@ public enum TUIController {
     public static let leftArrowKey: Character = "\u{E000}"
     public static let rightArrowKey: Character = "\u{E001}"
 
+    /// PUA sentinels for PageUp/PageDown/Home/End (`ESC[5~`/`ESC[6~`/`ESC[1~`/`ESC[4~`
+    /// — see `readKeyOrArrowNonBlocking()` in InnerEarCLI/TerminalIO.swift).
+    /// Deliberately NOT aliased to the existing letter mnemonics (`"b"`/`" "`/`"g"`/`"G"`)
+    /// even though they trigger the identical behavior in `.viewingResults`:
+    /// `"b"` already means something destructive elsewhere (`confirmDelete`'s
+    /// "delete Both audio and transcript"), so a real PageUp keypress must
+    /// never be able to fire it in an unrelated screen. Same reasoning as
+    /// `leftArrowKey`/`rightArrowKey` — a real keypress can never produce a
+    /// PUA codepoint, so aliasing is done explicitly per-state (see the
+    /// `.viewingResults` case in `reduce(_:_:)`) instead of by character reuse.
+    public static let pageUpKey: Character = "\u{E002}"
+    public static let pageDownKey: Character = "\u{E003}"
+    public static let homeKey: Character = "\u{E004}"
+    public static let endKey: Character = "\u{E005}"
+
     /// Fixed step size for the transcript pager's space/b page-forward and
     /// page-backward keys (see `.viewingResults` in `reduce(_:_:)`). The
     /// reducer is pure and has no access to the terminal's actual height, so
@@ -408,7 +423,7 @@ public enum TUIController {
                     scrollOffset: max(scrollOffset - 1, 0)
                 )
                 return (s, [])
-            case " ":
+            case " ", Self.pageDownKey:
                 var s = state
                 s.recordings = .viewingResults(
                     transcript: transcript,
@@ -416,7 +431,7 @@ public enum TUIController {
                     scrollOffset: scrollOffset + Self.pagerPageStep
                 )
                 return (s, [])
-            case "b":
+            case "b", Self.pageUpKey:
                 var s = state
                 s.recordings = .viewingResults(
                     transcript: transcript,
@@ -424,11 +439,11 @@ public enum TUIController {
                     scrollOffset: max(scrollOffset - Self.pagerPageStep, 0)
                 )
                 return (s, [])
-            case "g":
+            case "g", Self.homeKey:
                 var s = state
                 s.recordings = .viewingResults(transcript: transcript, summary: summary, scrollOffset: 0)
                 return (s, [])
-            case "G":
+            case "G", Self.endKey:
                 var s = state
                 // A large-but-overflow-safe sentinel, not Int.max: the
                 // renderer clamps it down to the real bottom at render time,

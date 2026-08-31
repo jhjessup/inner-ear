@@ -991,6 +991,85 @@ struct TUIControllerTests {
     }
 
     @Test
+    func recordings_viewingResults_pageDownKey_behavesLikeSpace() {
+        // PageDown (ESC[6~) is a distinct PUA sentinel from the literal " "
+        // key, not an alias of it, but both must page forward identically.
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 5)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key(TUIController.pageDownKey))
+        if case .viewingResults(_, _, let offset) = nextState.recordings {
+            #expect(offset == 15)
+        } else {
+            #expect(Bool(false))
+        }
+    }
+
+    @Test
+    func recordings_viewingResults_pageUpKey_behavesLikeB() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 5)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key(TUIController.pageUpKey))
+        if case .viewingResults(_, _, let offset) = nextState.recordings {
+            #expect(offset == 0)
+        } else {
+            #expect(Bool(false))
+        }
+    }
+
+    @Test
+    func recordings_viewingResults_homeKey_jumpsToTop() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 42)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key(TUIController.homeKey))
+        if case .viewingResults(_, _, let offset) = nextState.recordings {
+            #expect(offset == 0)
+        } else {
+            #expect(Bool(false))
+        }
+    }
+
+    @Test
+    func recordings_viewingResults_endKey_jumpsPastEnd() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 0)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key(TUIController.endKey))
+        if case .viewingResults(_, _, let offset) = nextState.recordings {
+            #expect(offset > 1_000_000)
+        } else {
+            #expect(Bool(false))
+        }
+    }
+
+    @Test
+    func confirmDelete_pageUpKey_doesNotTriggerDeleteBoth() {
+        // The whole reason PageUp/PageDown got their own PUA sentinels
+        // instead of aliasing the literal 'b'/' ' characters: 'b' means
+        // "delete Both audio and transcript" in this unrelated state. A
+        // PageUp keypress must never be able to fire that.
+        let entries = makeEntries([makeRecording()])
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .confirmDelete(entries: entries, selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key(TUIController.pageUpKey))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
     func recordings_viewingResults_e_emitsExportMarkdown() {
         let transcript = makeTranscript()
         let summary = makeSummary()

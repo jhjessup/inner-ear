@@ -133,7 +133,10 @@ func readKeyNonBlocking() -> Character? {
 /// dedicated Private-Use-Area sentinel characters (not reused letters like
 /// 'h'/'l') specifically so the controller can treat them as global,
 /// Tab-like pane-switch keys without ever colliding with literal typed
-/// text (see the case-3.5 comment in `TUIController.reduce(_:_:)`). A bare
+/// text (see the case-3.5 comment in `TUIController.reduce(_:_:)`).
+/// PageUp/PageDown/Home/End are the longer `ESC [ <digit> ~` CSI form (not
+/// the 3-byte arrow form) and map to their own PUA sentinels for the same
+/// collision-avoidance reason — see the digit-case comment below. A bare
 /// Esc keypress (nothing, or something other than `[`, follows within this
 /// read cycle) is still returned as `"\u{1B}"` exactly as before.
 func readKeyOrArrowNonBlocking() -> Character? {
@@ -168,6 +171,25 @@ func readKeyOrArrowNonBlocking() -> Character? {
     case UInt8(ascii: "B"): return "j"       // Down
     case UInt8(ascii: "C"): return TUIController.rightArrowKey // Right
     case UInt8(ascii: "D"): return TUIController.leftArrowKey  // Left
+    case UInt8(ascii: "1"), UInt8(ascii: "4"), UInt8(ascii: "5"), UInt8(ascii: "6"):
+        // PageUp/PageDown/Home/End on most terminals (xterm, iTerm2,
+        // Terminal.app, tmux) are a 4-byte CSI sequence, not the 3-byte
+        // arrow-key form above: `ESC [ <digit> ~`. Without this, e.g.
+        // PageDown's third byte ('6') fell through to the `default` case
+        // below and was misread as a bare Esc — which, inside the
+        // transcript viewer, immediately backs the user out of the view
+        // they were trying to scroll. Consume the expected trailing '~';
+        // if it doesn't arrive (a genuinely different/unsupported
+        // sequence), fall back to bare-Esc rather than misfiring.
+        guard readRawByteNonBlocking() == UInt8(ascii: "~") else {
+            return Character(UnicodeScalar(first))
+        }
+        switch third {
+        case UInt8(ascii: "5"): return TUIController.pageUpKey
+        case UInt8(ascii: "6"): return TUIController.pageDownKey
+        case UInt8(ascii: "1"): return TUIController.homeKey
+        default: return TUIController.endKey // "4"
+        }
     default:
         return Character(UnicodeScalar(first)) // unrecognized sequence — treat as bare Esc
     }
