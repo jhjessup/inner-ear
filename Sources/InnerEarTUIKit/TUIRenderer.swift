@@ -578,7 +578,7 @@ public enum TUIRenderer {
             case .confirmDelete:
                 return "[a] Audio  [t] Transcript  [b] Both  [Esc] Cancel"
             case .viewingResults:
-                return "[j/k] Line  [space/b] Page  [g/G] Top/Bottom  [e] Export  [<-] Nav  [Esc] Back"
+                return "[j/k] Line  [space/b] Page  [g/G] Top/Bottom  [e] Export  [Esc] List  [<-] Nav"
             case .processing:
                 return "[Tab] Nav"
             }

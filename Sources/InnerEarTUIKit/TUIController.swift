@@ -123,36 +123,70 @@ public enum TUIController {
             return (s, [])
         }
 
-        // 4. Esc (when not recording and not in a modal): reset the
-        // current section's sub-state to its safe/idle form, and pull
-        // focus back to the nav pane.
+        // 4. Esc (when not recording and not in a modal): pop ONE level of
+        // navigation, like a back button — never more than one. If the
+        // current section is showing a nested sub-state (a confirm dialog,
+        // the transcript viewer, the y/n prompt, an in-progress edit, the
+        // post-record "saved" screen), Esc pops back to that section's home
+        // state and STAYS in the detail pane. Only when the section is
+        // ALREADY at its home state does Esc take the further step of
+        // pulling focus back to the nav pane — there's nothing left to pop
+        // within the section, so "back" naturally means "back out of the
+        // section entirely."
+        //
+        // This one-level-at-a-time behavior is deliberate, not incidental:
+        // every nested state's footer already advertises Esc as "Cancel"
+        // (see TUIRenderer.footerText), never "Back to nav" — e.g.
+        // confirmDelete's "[Esc] Cancel" or Settings editing's "[Enter]
+        // Save  [Esc] Cancel". An earlier version of this handler
+        // unconditionally forced focusedPane to .navigation on EVERY Esc
+        // regardless of nesting depth, which silently broke that contract:
+        // closing the transcript viewer (or backing out of any confirm
+        // dialog) jumped two levels at once — out of the nested view AND
+        // out to the nav pane — even though the footer only ever promised
+        // "cancel this one step." Reported directly as "closing a
+        // transcript panel drops back to the left panel instead of back to
+        // the recording panel." Left/Right arrows still exist as the
+        // explicit, unconditional "jump straight to nav" shortcut (see
+        // `leftArrowKey` above) — Esc and Left-arrow are now genuinely
+        // different actions, not two spellings of the same one.
         if key == "\u{1B}" {
             var s = state
-            s.focusedPane = .navigation
             switch s.selectedSection {
             case 0:
-                // Record: idle/prompting/saved -> idle. .recording is handled
-                // by case 2 so it never reaches here.
-                if case .idle = s.record { /* no-op */ }
-                else { s.record = .idle }
+                // Record: .idle is home. .prompting/.saved are one level in
+                // — pop to .idle, stay in the detail pane. `.recording` is
+                // handled by case 2 above so it never reaches here.
+                switch s.record {
+                case .idle:
+                    s.focusedPane = .navigation
+                case .prompting, .saved:
+                    s.record = .idle
+                case .recording:
+                    break
+                }
             case 1:
-                // Recordings: .list stays as-is (don't clobber a populated
-                // list). .processing is a no-op so we don't corrupt state
-                // mid-pipeline. .confirmGenerateTranscript and .confirmDelete
-                // revert to .list using the entries/selectedIndex already in
-                // hand (same data the per-section reducer would have used
-                // for 'n' or Esc) — preserves any in-progress browsing state.
+                // Recordings: .list is home. .processing is a genuine
+                // no-op (matches reduceRecordings' "no keys do anything
+                // while the pipeline is running" — Esc must not be a
+                // secret exception to that). The three nested views pop to
+                // .list, staying in the detail pane:
                 //
-                // .viewingResults previously reset to an EMPTY .list with no
-                // reload effect, on the theory that the next nav Enter would
-                // refresh it — but Esc from results is exactly the path a
-                // user takes right after recording+processing something new,
-                // and leaving them at a blank "No recordings yet." until
-                // they leave and re-enter the section reads as data loss,
-                // not a lazy-reload optimization. Emit `.loadRecordings` so
-                // the list is genuinely fresh (and includes what was just
-                // processed) the moment Esc is pressed, not on next entry.
+                // .viewingResults reloads via `.loadRecordings` (not just a
+                // bare pop to a stale list) — the moment right after
+                // recording+processing something new is exactly the path
+                // that lands here, and leaving the list stale until the
+                // user leaves and re-enters the section would read as data
+                // loss, not a lazy-reload optimization.
+                //
+                // .confirmGenerateTranscript / .confirmDelete already have
+                // the entries/selectedIndex in hand from when the confirm
+                // was opened, so popping back needs no reload.
                 switch s.recordings {
+                case .list:
+                    s.focusedPane = .navigation
+                case .processing:
+                    break
                 case .viewingResults:
                     s.recordings = .list(entries: [], selectedIndex: 0)
                     return (s, [.loadRecordings])
@@ -160,31 +194,23 @@ public enum TUIController {
                     s.recordings = .list(entries: entries, selectedIndex: selectedIndex)
                 case .confirmDelete(let entries, let selectedIndex):
                     s.recordings = .list(entries: entries, selectedIndex: selectedIndex)
-                case .list, .processing:
-                    break
                 }
             case 2:
-                // Settings: editing -> discard the in-progress edit by
-                // emitting a fresh .loadConfigStatus (which the run loop
-                // will fulfill by overwriting state.settings with the real
-                // on-disk .viewing values), and clear the stale .editing
-                // state with a harmless placeholder. This reuses an
-                // existing effect instead of inventing new state-tracking
-                // machinery to remember the pre-edit .viewing snapshot.
-                //
-                // Tab-away-during-editing is allowed by case 3 (Tab just
-                // flips focusedPane, doesn't touch settings). When the user
-                // later returns to Settings via nav Enter, case 5's
-                // selectedSection==2 rule re-emits .loadConfigStatus at
-                // that point, which overwrites the stale .editing state
-                // with a fresh .viewing — so the abandoned edit is
-                // naturally discarded next time Settings is actually viewed.
-                if case .editing = s.settings {
+                // Settings: .viewing is home. .editing discards the
+                // in-progress edit by emitting a fresh .loadConfigStatus
+                // (the run loop overwrites state.settings with the real
+                // on-disk .viewing values) and stays in the detail pane —
+                // it does NOT also exit to nav, matching its footer's
+                // "[Esc] Cancel" (not "back to nav").
+                switch s.settings {
+                case .viewing:
+                    s.focusedPane = .navigation
+                case .editing:
                     s.settings = .viewing(resolvedPath: "", source: .defaultLocation)
                     return (s, [.loadConfigStatus])
                 }
             default:
-                break
+                s.focusedPane = .navigation
             }
             return (s, [])
         }
@@ -340,13 +366,16 @@ public enum TUIController {
             }
 
         case .confirmGenerateTranscript(let entries, let selectedIndex):
+            // Esc is NOT handled here — it's intercepted earlier by the
+            // global Esc handler in reduce(_:_:) (case 4), which pops this
+            // exact same way. Only 'n' needs its own case.
             switch key {
             case "y":
                 let recording = entries[selectedIndex].recording
                 var s = state
                 s.recordings = .processing(recording: recording, statusLine: "Starting...", stepIndex: 0)
                 return (s, [.runPipeline(recording)])
-            case "n", "\u{1B}":
+            case "n":
                 var s = state
                 s.recordings = .list(entries: entries, selectedIndex: selectedIndex)
                 return (s, [])
@@ -385,10 +414,9 @@ public enum TUIController {
                     effects.append(.loadRecordings)
                 }
                 return (s, effects)
-            case "\u{1B}":
-                var s = state
-                s.recordings = .list(entries: entries, selectedIndex: selectedIndex)
-                return (s, [])
+            // Esc is NOT handled here — see the comment on
+            // .confirmGenerateTranscript above; the global handler pops
+            // this exact same way.
             default:
                 return (state, [])
             }

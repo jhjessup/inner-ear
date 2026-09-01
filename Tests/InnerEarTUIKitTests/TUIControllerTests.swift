@@ -360,6 +360,148 @@ struct TUIControllerTests {
         #expect(effects.isEmpty)
     }
 
+    // MARK: - Esc pops exactly one level (regression: used to always jump
+    // to the nav pane regardless of nesting depth). All tests above start
+    // from focusedPane: .navigation, which can never distinguish "stayed
+    // put" from "jumped to nav" since it started there — these start from
+    // the realistic .detail state a user is actually looking at.
+
+    @Test
+    func esc_whileRecordPrompting_fromDetail_popsToIdle_staysInDetail() {
+        let state = TUIState(focusedPane: .detail, selectedSection: 0, record: .prompting)
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.record == .idle)
+        #expect(nextState.focusedPane == .detail)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func esc_whileRecordSaved_fromDetail_popsToIdle_staysInDetail() {
+        let state = TUIState(focusedPane: .detail, selectedSection: 0, record: .saved(makeRecording()))
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.record == .idle)
+        #expect(nextState.focusedPane == .detail)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func esc_whileRecordIdle_fromDetail_exitsToNav() {
+        // .idle is Record's home state — nothing left to pop, so Esc takes
+        // the further step of exiting to the nav pane.
+        let state = TUIState(focusedPane: .detail, selectedSection: 0, record: .idle)
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.record == .idle)
+        #expect(nextState.focusedPane == .navigation)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func esc_whileViewingResults_fromDetail_popsToList_staysInDetail() {
+        // The exact regression this fix addresses: closing the transcript
+        // viewer must land back on the Recordings list still focused in
+        // the detail pane — not kick the user out to the nav column.
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 3)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.focusedPane == .detail)
+        if case .list = nextState.recordings {
+            // ok
+        } else {
+            #expect(Bool(false), "Expected .list after Esc")
+        }
+        #expect(effects == [.loadRecordings])
+    }
+
+    @Test
+    func esc_whileList_fromDetail_exitsToNav() {
+        let entries = makeEntries([makeRecording()])
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: entries, selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.focusedPane == .navigation)
+        #expect(nextState.recordings == .list(entries: entries, selectedIndex: 0))
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func esc_whileProcessing_fromDetail_isTrueNoOp_doesNotExitToNav() {
+        // reduceRecordings documents .processing as "no keys do anything
+        // while the pipeline is running" — Esc must not be a silent
+        // exception that yanks focus away mid-pipeline.
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .processing(recording: makeRecording(), statusLine: "Transcribing...", stepIndex: 1)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func esc_whileConfirmGenerateTranscript_fromDetail_popsToList_staysInDetail() {
+        let entries = makeEntries([makeRecording()])
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .confirmGenerateTranscript(entries: entries, selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.focusedPane == .detail)
+        #expect(nextState.recordings == .list(entries: entries, selectedIndex: 0))
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func esc_whileConfirmDelete_fromDetail_popsToList_staysInDetail() {
+        let entries = makeEntries([makeRecording()])
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .confirmDelete(entries: entries, selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.focusedPane == .detail)
+        #expect(nextState.recordings == .list(entries: entries, selectedIndex: 0))
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func esc_whileSettingsEditing_fromDetail_popsToViewing_staysInDetail() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .editing(currentInput: "/tmp/newpath")
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.focusedPane == .detail)
+        if case .viewing = nextState.settings {
+            // ok
+        } else {
+            #expect(Bool(false), "Expected .viewing after Esc")
+        }
+        #expect(effects == [.loadConfigStatus])
+    }
+
+    @Test
+    func esc_whileSettingsViewing_fromDetail_exitsToNav() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .viewing(resolvedPath: "/data", source: .configFile)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.focusedPane == .navigation)
+        #expect(nextState.settings == state.settings)
+        #expect(effects.isEmpty)
+    }
+
     // MARK: - Modal: swallows all but Enter/Esc
 
     @Test
