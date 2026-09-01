@@ -163,6 +163,140 @@ struct ChannelBasedDiarizationServiceTests {
         #expect(result.recordingStartedAt == original.recordingStartedAt)
     }
 
+    // MARK: - SpeakerSeparationService composition
+
+    /// Two-segment system-audio stub (distinct from `makeSystemAudioStub()`,
+    /// which only has one segment) — needed so the multi-speaker tests below
+    /// have two segments that can be attributed to two different clusters.
+    private func makeTwoSegmentSystemAudioStub() -> Transcript {
+        let remoteStub = TestFixtures.speaker(label: "Far End Original", isLocalUser: false)
+        return Transcript(
+            recordingID: UUID(),
+            languageCode: "en",
+            modelUsed: TranscriptionModel.whisperLargeV3Turbo.rawValue,
+            speakers: [remoteStub],
+            segments: [
+                TranscriptSegment(speakerID: remoteStub.id, text: "Speaker A text", startTime: 1.0, endTime: 2.0),
+                TranscriptSegment(speakerID: remoteStub.id, text: "Speaker B text", startTime: 5.0, endTime: 6.0),
+            ],
+            generatedAt: Date(timeIntervalSince1970: 1_000_000)
+        )
+    }
+
+    private func makeRecordingWithSystemAudio() -> Recording {
+        Recording(
+            title: "r",
+            createdAt: Date(timeIntervalSince1970: 0),
+            duration: 8,
+            microphoneFileURL: URL(fileURLWithPath: "/tmp/mic.caf"),
+            systemAudioFileURL: URL(fileURLWithPath: "/tmp/sys.caf")
+        )
+    }
+
+    @Test
+    func maxSupportedSpeakers_withSpeakerSeparationService_isEight() {
+        let service = ChannelBasedDiarizationService(
+            transcriptionService: FakeTranscriptionService(stubbedTranscript: makeSystemAudioStub()),
+            speakerSeparationService: FakeSpeakerSeparationService()
+        )
+
+        #expect(service.maxSupportedSpeakers == 8)
+    }
+
+    @Test
+    func diarize_withSpeakerSeparationService_splitsIntoMultipleDistinctRemoteSpeakers() async throws {
+        let transcriptionFake = FakeTranscriptionService(stubbedTranscript: makeTwoSegmentSystemAudioStub())
+        let separationFake = FakeSpeakerSeparationService()
+        separationFake.separateResult = [
+            SpeakerTurn(clusterID: 0, startTime: 0.5, endTime: 2.5),
+            SpeakerTurn(clusterID: 1, startTime: 4.5, endTime: 6.5),
+        ]
+        let service = ChannelBasedDiarizationService(
+            transcriptionService: transcriptionFake,
+            speakerSeparationService: separationFake
+        )
+        let original = makeLocalTranscript()
+
+        let merged = try await service.diarize(transcript: original, recording: makeRecordingWithSystemAudio())
+
+        // 1 local + 2 distinct remote speakers = 3 total.
+        #expect(merged.speakers.count == 3)
+        let speaker2 = merged.speakers.first { $0.label == "Speaker 2 (Remote)" }
+        let speaker3 = merged.speakers.first { $0.label == "Speaker 3 (Remote)" }
+        #expect(speaker2 != nil)
+        #expect(speaker3 != nil)
+
+        // clusterID 0 (0.5-2.5) overlaps segment A (1.0-2.0) -> Speaker 2.
+        // clusterID 1 (4.5-6.5) overlaps segment B (5.0-6.0) -> Speaker 3.
+        let segmentA = merged.segments.first { $0.text == "Speaker A text" }
+        let segmentB = merged.segments.first { $0.text == "Speaker B text" }
+        #expect(segmentA?.speakerID == speaker2?.id)
+        #expect(segmentB?.speakerID == speaker3?.id)
+    }
+
+    @Test
+    func diarize_whenSpeakerSeparationServiceReturnsNoTurns_fallsBackToSingleRemoteSpeaker() async throws {
+        let separationFake = FakeSpeakerSeparationService() // separateResult defaults to []
+        let service = ChannelBasedDiarizationService(
+            transcriptionService: FakeTranscriptionService(stubbedTranscript: makeSystemAudioStub()),
+            speakerSeparationService: separationFake
+        )
+        let original = makeLocalTranscript()
+
+        let merged = try await service.diarize(transcript: original, recording: makeRecordingWithSystemAudio())
+
+        #expect(merged.speakers.count == 2)
+        let remote = merged.speakers.first { !$0.isLocalUser }
+        #expect(remote?.label == "Speaker 2 (Remote)")
+    }
+
+    @Test
+    func diarize_whenSpeakerSeparationServiceThrows_fallsBackToSingleRemoteSpeaker() async throws {
+        let separationFake = FakeSpeakerSeparationService()
+        separationFake.separateError = SpeakerSeparationError.separationFailed(reason: "fake failure")
+        let service = ChannelBasedDiarizationService(
+            transcriptionService: FakeTranscriptionService(stubbedTranscript: makeSystemAudioStub()),
+            speakerSeparationService: separationFake
+        )
+        let original = makeLocalTranscript()
+
+        // Must NOT throw — separation failures degrade gracefully rather
+        // than failing the whole diarize() call.
+        let merged = try await service.diarize(transcript: original, recording: makeRecordingWithSystemAudio())
+
+        #expect(merged.speakers.count == 2)
+        let remote = merged.speakers.first { !$0.isLocalUser }
+        #expect(remote?.label == "Speaker 2 (Remote)")
+    }
+
+    @Test
+    func diarize_segmentWithNoOverlappingTurn_attributedToNearestTurnByMidpoint() async throws {
+        // Only one SpeakerTurn (clusterID 5, 0.0-1.5) — segment B (5.0-6.0)
+        // has zero overlap with it. Must still be attributed to the single
+        // remote speaker that exists, not dropped or left unattributed.
+        let transcriptionFake = FakeTranscriptionService(stubbedTranscript: makeTwoSegmentSystemAudioStub())
+        let separationFake = FakeSpeakerSeparationService()
+        separationFake.separateResult = [
+            SpeakerTurn(clusterID: 5, startTime: 0.0, endTime: 1.5),
+        ]
+        let service = ChannelBasedDiarizationService(
+            transcriptionService: transcriptionFake,
+            speakerSeparationService: separationFake
+        )
+        let original = makeLocalTranscript()
+
+        let merged = try await service.diarize(transcript: original, recording: makeRecordingWithSystemAudio())
+
+        // Only one clusterID present -> exactly one remote speaker.
+        let remoteSpeakers = merged.speakers.filter { !$0.isLocalUser }
+        #expect(remoteSpeakers.count == 1)
+
+        let segmentA = merged.segments.first { $0.text == "Speaker A text" }
+        let segmentB = merged.segments.first { $0.text == "Speaker B text" }
+        #expect(segmentA?.speakerID == remoteSpeakers.first?.id)
+        #expect(segmentB?.speakerID == remoteSpeakers.first?.id)
+    }
+
     @Test
     func diarize_withSystemAudio_preservesRecordingStartedAt() async throws {
         // On the merge path, the service constructs a brand-new Transcript
