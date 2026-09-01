@@ -69,6 +69,16 @@ final class FakeDiarizationService: DiarizationService, @unchecked Sendable {
     }
 }
 
+final class FakeSpeakerSeparationService: SpeakerSeparationService, @unchecked Sendable {
+    var separateResult: [SpeakerTurn] = []
+    var separateError: Error?
+
+    func separateSpeakers(audioFileURL: URL) async throws -> [SpeakerTurn] {
+        if let separateError { throw separateError }
+        return separateResult
+    }
+}
+
 final class FakeSummarizationService: SummarizationService, @unchecked Sendable {
     let backend: SummarizationBackend = .local(modelName: "fake-model")
     var stubbedSummary: Summary
