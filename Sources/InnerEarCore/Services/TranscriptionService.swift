@@ -47,6 +47,23 @@ public protocol TranscriptionService: AnyObject, Sendable {
 }
 
 extension TranscriptionService {
+    /// Shared "this model isn't supported" error, factored out of any one
+    /// implementation. `.parakeet` is a real case on `TranscriptionModel`
+    /// (the domain enum intentionally mirrors Thoth's accuracy-vs-speed
+    /// tradeoff) but has no implementation anywhere yet —
+    /// `WhisperKitTranscriptionService` rejects it at runtime rather than
+    /// letting it silently no-op or crash into a nonexistent WhisperKit
+    /// API. That rejection previously lived only inside
+    /// `WhisperKitTranscriptionService`'s own `switch`; a future second
+    /// `TranscriptionService` implementation would have had to remember to
+    /// replicate the exact same check. Call this from any implementation's
+    /// `transcribe(...)` for a model it doesn't support, so the failure
+    /// message and error case are consistent everywhere rather than
+    /// per-implementation copy-paste.
+    public static func unsupportedModelError(_ model: TranscriptionModel) -> TranscriptionError {
+        .transcriptionFailed(reason: "\(model.rawValue) model not yet supported")
+    }
+
     /// Convenience overload for callers that don't need live progress — this
     /// is what makes the existing 3-argument call sites (ChannelBasedDiarizationService,
     /// TranscribeCommand) keep compiling unchanged. `progressHandler` reports a

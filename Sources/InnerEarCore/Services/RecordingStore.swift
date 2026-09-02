@@ -52,7 +52,9 @@ public final class RecordingStore: Sendable {
 
     /// All persisted recordings, most recently created first. Skips any
     /// file that fails to decode (e.g. a partially-written or foreign file
-    /// in the directory) rather than failing the whole listing.
+    /// in the directory) rather than failing the whole listing — but prints
+    /// a warning naming the file, so a user who notices a recording missing
+    /// has something concrete to report instead of it silently vanishing.
     public func listRecordings() throws -> [Recording] {
         let directory = baseDirectory.appendingPathComponent("recordings", isDirectory: true)
         let files = try FileManager.default.contentsOfDirectory(
@@ -61,8 +63,7 @@ public final class RecordingStore: Sendable {
         ).filter { $0.pathExtension == "json" }
 
         let recordings: [Recording] = files.compactMap { url in
-            guard let data = try? Data(contentsOf: url) else { return nil }
-            return try? decoder.decode(Recording.self, from: data)
+            decodeOrWarn(Recording.self, from: url)
         }
 
         return recordings.sorted { $0.createdAt > $1.createdAt }
@@ -109,8 +110,7 @@ public final class RecordingStore: Sendable {
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }
         let transcripts: [Transcript] = files.compactMap { url in
-            guard let data = try? Data(contentsOf: url) else { return nil }
-            return try? decoder.decode(Transcript.self, from: data)
+            decodeOrWarn(Transcript.self, from: url)
         }
         return transcripts.sorted { $0.generatedAt > $1.generatedAt }
     }
@@ -122,8 +122,7 @@ public final class RecordingStore: Sendable {
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }
         let summaries: [Summary] = files.compactMap { url in
-            guard let data = try? Data(contentsOf: url) else { return nil }
-            return try? decoder.decode(Summary.self, from: data)
+            decodeOrWarn(Summary.self, from: url)
         }
         return summaries.sorted { $0.generatedAt > $1.generatedAt }
     }
@@ -197,6 +196,23 @@ public final class RecordingStore: Sendable {
             throw RecordingStoreError.decodingFailed(reason: error.localizedDescription)
         } catch {
             throw RecordingStoreError.writeFailed(reason: error.localizedDescription)
+        }
+    }
+
+    /// Used only by the `list*()` methods, which intentionally skip
+    /// individual files that fail to read/decode rather than failing the
+    /// whole listing (a corrupted or partially-written file shouldn't hide
+    /// every OTHER recording too). Printing a warning here is the
+    /// difference between that being a silent, undiscoverable data loss and
+    /// a user having something concrete (the file path) to report if a
+    /// recording goes missing from a list.
+    private func decodeOrWarn<T: Decodable>(_ type: T.Type, from url: URL) -> T? {
+        do {
+            let data = try Data(contentsOf: url)
+            return try decoder.decode(type, from: data)
+        } catch {
+            print("Warning: skipping unreadable \(type) file at \(url.path): \(error)")
+            return nil
         }
     }
 }
