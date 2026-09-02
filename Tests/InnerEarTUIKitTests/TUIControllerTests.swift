@@ -51,7 +51,8 @@ struct TUIControllerTests {
             segments: [
                 TranscriptSegment(speakerID: speaker.id, text: "Hello world", startTime: 0, endTime: 1)
             ],
-            generatedAt: Date()
+            generatedAt: Date(),
+            recordingStartedAt: Date(timeIntervalSince1970: 1_000_000)
         )
     }
 

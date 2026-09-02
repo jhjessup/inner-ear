@@ -124,7 +124,8 @@ enum TestFixtures {
             segments: [
                 TranscriptSegment(speakerID: speakers.first?.id, text: "Hello world", startTime: 0, endTime: 1.2)
             ],
-            generatedAt: Date(timeIntervalSince1970: 0)
+            generatedAt: Date(timeIntervalSince1970: 0),
+            recordingStartedAt: Date(timeIntervalSince1970: 0)
         )
     }
 

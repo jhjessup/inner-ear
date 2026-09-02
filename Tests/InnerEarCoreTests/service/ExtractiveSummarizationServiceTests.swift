@@ -63,7 +63,8 @@ struct ExtractiveSummarizationServiceTests {
                     startTime: 20.0, endTime: 22.0
                 ),
             ],
-            generatedAt: Date(timeIntervalSince1970: 1_000_000)
+            generatedAt: Date(timeIntervalSince1970: 1_000_000),
+            recordingStartedAt: Date(timeIntervalSince1970: 1_000_000)
         )
     }
 
@@ -80,7 +81,8 @@ struct ExtractiveSummarizationServiceTests {
                 TranscriptSegment(speakerID: alice.id, text: "We decided to ship on Friday.", startTime: 2, endTime: 4),
                 TranscriptSegment(speakerID: alice.id, text: "Meeting adjourned.", startTime: 5, endTime: 6),
             ],
-            generatedAt: Date(timeIntervalSince1970: 1_000_000)
+            generatedAt: Date(timeIntervalSince1970: 1_000_000),
+            recordingStartedAt: Date(timeIntervalSince1970: 1_000_000)
         )
     }
 
@@ -97,7 +99,8 @@ struct ExtractiveSummarizationServiceTests {
                 TranscriptSegment(speakerID: bob.id, text: "Action item: send the report to Alice by EOD.", startTime: 2, endTime: 5),
                 TranscriptSegment(speakerID: bob.id, text: "See you tomorrow.", startTime: 6, endTime: 7),
             ],
-            generatedAt: Date(timeIntervalSince1970: 1_000_000)
+            generatedAt: Date(timeIntervalSince1970: 1_000_000),
+            recordingStartedAt: Date(timeIntervalSince1970: 1_000_000)
         )
     }
 
@@ -115,7 +118,8 @@ struct ExtractiveSummarizationServiceTests {
                 TranscriptSegment(speakerID: bob.id, text: "Design system rollout is scheduled for June.", startTime: 4, endTime: 7),
                 TranscriptSegment(speakerID: alice.id, text: "Deadline extensions require VP sign-off.", startTime: 8, endTime: 11),
             ],
-            generatedAt: Date(timeIntervalSince1970: 1_000_000)
+            generatedAt: Date(timeIntervalSince1970: 1_000_000),
+            recordingStartedAt: Date(timeIntervalSince1970: 1_000_000)
         )
     }
 
@@ -130,7 +134,8 @@ struct ExtractiveSummarizationServiceTests {
             modelUsed: "test",
             speakers: [],
             segments: [],
-            generatedAt: Date()
+            generatedAt: Date(),
+            recordingStartedAt: Date(timeIntervalSince1970: 1_000_000)
         )
 
         await #expect(throws: SummarizationError.emptyTranscript) {

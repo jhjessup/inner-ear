@@ -29,7 +29,8 @@ struct ViewportScrollingTests {
             segments: [
                 TranscriptSegment(speakerID: speaker.id, text: fullText, startTime: 0, endTime: 100)
             ],
-            generatedAt: Date()
+            generatedAt: Date(),
+            recordingStartedAt: Date(timeIntervalSince1970: 1_000_000)
         )
     }
 
@@ -182,7 +183,8 @@ struct ViewportScrollingTests {
             segments: [
                 TranscriptSegment(speakerID: speaker.id, text: longPara, startTime: 0, endTime: 100)
             ],
-            generatedAt: Date()
+            generatedAt: Date(),
+            recordingStartedAt: Date(timeIntervalSince1970: 1_000_000)
         )
         // Large offset
         let state = viewingResultsState(transcript: transcript, summary: nil, scrollOffset: 100)

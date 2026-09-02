@@ -44,7 +44,8 @@ struct ChannelBasedDiarizationServiceTests {
             segments: [
                 TranscriptSegment(speakerID: remoteStub.id, text: "Yes, I can hear you.", startTime: 1.6, endTime: 2.9),
             ],
-            generatedAt: Date(timeIntervalSince1970: 1_000_000)
+            generatedAt: Date(timeIntervalSince1970: 1_000_000),
+            recordingStartedAt: Date(timeIntervalSince1970: 1_000_000)
         )
     }
 
@@ -179,7 +180,8 @@ struct ChannelBasedDiarizationServiceTests {
                 TranscriptSegment(speakerID: remoteStub.id, text: "Speaker A text", startTime: 1.0, endTime: 2.0),
                 TranscriptSegment(speakerID: remoteStub.id, text: "Speaker B text", startTime: 5.0, endTime: 6.0),
             ],
-            generatedAt: Date(timeIntervalSince1970: 1_000_000)
+            generatedAt: Date(timeIntervalSince1970: 1_000_000),
+            recordingStartedAt: Date(timeIntervalSince1970: 1_000_000)
         )
     }
 
