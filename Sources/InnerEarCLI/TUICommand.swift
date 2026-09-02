@@ -15,7 +15,11 @@ struct TUICommand: AsyncParsableCommand {
         // Instantiate all real services
         let audioCapture = try AVFoundationAudioCaptureService()
         let transcription = WhisperKitTranscriptionService()
-        let diarization = ChannelBasedDiarizationService(transcriptionService: transcription)
+        let speakerSeparation = SpeakerKitSpeakerSeparationService()
+        let diarization = ChannelBasedDiarizationService(
+            transcriptionService: transcription,
+            speakerSeparationService: speakerSeparation
+        )
         let summarization = ExtractiveSummarizationService()
         let export = FileExportService()
         let store = try RecordingStore()
