@@ -1,8 +1,11 @@
-# Building InnerEar (CLI now, GUI App later on your Mac)
+# Building InnerEar
 
-This repo's `Package.swift` builds two things entirely via Swift Package
-Manager — Command Line Tools alone (no full Xcode.app) is normally enough
-for `swift build`/`test`/`run` on a plain SPM package like this one.
+This repo's `Package.swift` builds entirely via Swift Package Manager —
+Command Line Tools alone (no full Xcode.app) is normally enough for
+`swift build`/`test`/`run` on a plain SPM package like this one. Xcode.app
+is only needed for the optional GUI App wrapper in §2 below (signing,
+Info.plist) — not for building/testing/running the CLI/TUI, which is the
+primary, fully-implemented interface (`innerear tui`).
 
 If you hit a manifest-compilation failure — `swift build` fails to link
 `PackageDescription`, before any project code is even reached, the same
@@ -13,23 +16,19 @@ fixes in order: switching to an independent Swift.org toolchain via
 `swiftly` (no sudo needed), then reinstalling Command Line Tools. See that
 script for the manual commands if you're not running it via the script.
 
-Xcode.app is only needed for the optional GUI App target in §4 below
-(signing, Info.plist, Xcode Cloud) — not for building/testing/running the
-CLI.
+The targets:
 
-The two targets:
-
-- **`InnerEarCLI`** (product name `innerear`) — the CLI front end. First
-  target in the package, and the fastest path to exercising the real engine
-  once real service implementations exist, since a bare CLI binary needs no
-  App Sandbox entitlements or Info.plist to request mic access (macOS still
-  prompts once at runtime, tied to the terminal/binary, not to an App target).
-- **`InnerEarCore`** — the protocol-based engine (services, models, view
-  models, SwiftUI views) both the CLI and the future GUI app depend on.
-
-A GUI App target (for eventual Mac App Store distribution) is a separate,
-optional step — see §4 below — and is the only part of this project that
-actually requires Xcode.
+- **`InnerEarCLI`** (product name `innerear`) — the CLI/TUI front end.
+  `innerear tui` is the primary interface; `record`/`transcribe`/`export`
+  are lower-level, non-interactive subcommands for scripting (see the
+  root `README.md`).
+- **`InnerEarCore`** — the protocol-based engine: real
+  `AVFoundation`/`ScreenCaptureKit`-backed audio capture, `WhisperKit`
+  transcription, `SpeakerKit` diarization, extractive summarization, and
+  multi-format export, all behind protocols with one fake each for tests
+  (see `ARCHITECTURE.md`).
+- **`InnerEarTUIKit`** — the pure TUI state machine and renderer
+  (functional core), exercised by the impure shell in `InnerEarCLI`.
 
 ## 1. Build and test the package
 
@@ -37,55 +36,15 @@ actually requires Xcode.
 cd inner-ear
 swift build
 swift test
-swift run innerear --version
-swift run innerear --help
+swift run innerear tui
 ```
 
-`record`/`transcribe`/`export` currently print "not yet implemented" — the
-CLI's command routing is scaffolded against `InnerEarCore`'s protocols, but
-no concrete `AVFoundation`/`ScreenCaptureKit`/`WhisperKit`-backed
-implementation exists yet (see ADR-001 in the mission audit log). That's the
-next mission, done on macOS where it can actually be compiled and verified.
+First launch downloads the WhisperKit/SpeakerKit Core ML models on first
+use — expect a real download and a pause the first time you record or
+transcribe something. `record`/`transcribe`/`export` also work as
+standalone, non-interactive subcommands; see the root `README.md`.
 
-## 2. Add WhisperKit
-
-```bash
-# In Package.swift, add to `dependencies:`
-.package(url: "https://github.com/argmaxinc/WhisperKit", from: "<version>")
-# and add "WhisperKit" to the InnerEarCore target's dependencies.
-```
-
-## 3. Implement the real services
-
-Write concrete types conforming to the five protocols in
-`Sources/InnerEarCore/Services/`:
-
-- `AudioCaptureService` → back with `AVAudioEngine` (microphone) +
-  `ScreenCaptureKit` (system audio). (Phase 2 — not yet implemented.)
-- `TranscriptionService` → back with WhisperKit's pipeline. (Phase 3 — not
-  yet implemented.)
-- `DiarizationService` → on-device diarization (WhisperKit has experimental
-  diarization support; evaluate against Core ML alternatives). (Phase 4 —
-  not yet implemented.)
-- `SummarizationService` → extractive (top-N sentence scoring) to start;
-  local Core ML LLM is a later stretch phase. (Phase 5 — not yet
-  implemented.)
-- `ExportService` → **implemented** (`FileExportService.swift`): Core
-  Graphics/Core Text for PDF, plain string writers for Markdown/text/RTF,
-  `JSONEncoder` for JSON, a hand-rolled writer for SRT subtitles.
-
-Keep each implementation in its own file next to the protocol, e.g.
-`WhisperKitTranscriptionService.swift`, so the protocol file stays a pure
-contract. Wire them into `InnerEarCLI/main.swift`'s ArgumentParser command
-handlers once they exist, replacing the remaining "not yet implemented"
-stubs (see `ExportCommand` in that file for the pattern — `export` is
-already wired to `FileExportService`/`RecordingStore`).
-
-Run the CLI against real audio with `swift run innerear record`; the first
-run triggers the standard macOS microphone (and, if `--no-system-audio` is
-omitted, Screen Recording) permission prompt.
-
-## 4. Optional: wrap InnerEarCore in a macOS GUI App (Xcode, for App Store distribution)
+## 2. Optional: wrap InnerEarCore in a macOS GUI App (Xcode, for App Store distribution)
 
 1. Xcode → File → New → Project → macOS → App.
 2. Product Name: `InnerEar`. Interface: SwiftUI. Language: Swift.
