@@ -2,11 +2,14 @@ import Foundation
 import Testing
 @testable import InnerEarCore
 
-// @service — exercises each service protocol directly (not through the ViewModel/UI),
+// @service — exercises each service protocol directly (not through the TUI layer),
 // per TEST_DOCTRINE.md AX-P4. These use fakes now; once real WhisperKit/Core ML-backed
 // implementations land, the same test shapes apply against the concrete types.
 //
-// Swift Testing, not XCTest — see RecordingViewModelTests.swift for why.
+// Swift Testing, not XCTest: XCTest.framework is bundled only with full Xcode, not
+// Command Line Tools, so `swift test` fails with "no such module 'XCTest'" on a
+// CLT-only machine. Swift Testing ships with the open-source Swift toolchain itself
+// and works without Xcode — see MAC_VERIFY_RESULTS.md for the failure that prompted this.
 struct ServiceContractTests {
 
     @Test
