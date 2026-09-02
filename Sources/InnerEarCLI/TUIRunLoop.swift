@@ -44,6 +44,22 @@ enum TUIRunLoop {
         )
 
         var state = TUIState()
+        // What `renderNow()` last actually drew, so the end-of-iteration
+        // idle render (step 2 below) can skip redundant redraws. `nil`
+        // until the first `renderNow()` call, so that call always fires.
+        // Terminal size is tracked alongside state (not part of `TUIState`
+        // itself) specifically so a resize picked up while otherwise idle
+        // — no keypress, no state change — still triggers a redraw; state
+        // being unchanged does NOT mean the terminal dimensions are.
+        var lastRenderedState: TUIState?
+        // Sentinel, not Optional: avoids relying on tuple-vs-Optional
+        // equality (tuples can't conform to Equatable in Swift, so
+        // `(Int, Int)?` comparisons are unreliable). `-1` can never equal a
+        // real `terminalSize()` result, so the very first check below is
+        // guaranteed to see a mismatch and render — same effect as `nil`,
+        // without the tuple-Optional comparison risk.
+        var lastRenderedWidth = -1
+        var lastRenderedHeight = -1
 
         // Eagerly load the Recordings list once at startup, even though
         // the Recordings section isn't focused yet. The detail pane always
@@ -69,6 +85,9 @@ enum TUIRunLoop {
             let size = terminalSize()
             let lines = TUIRenderer.render(state: state, width: size.width, height: size.height)
             writeToTerminal(lines)
+            lastRenderedState = state
+            lastRenderedWidth = size.width
+            lastRenderedHeight = size.height
         }
 
         while true {
@@ -279,8 +298,37 @@ enum TUIRunLoop {
             }
 
             // 2. Render (covers idle-state updates with no keypress, e.g. the
-            // live elapsed-time counter while .recording)
-            renderNow()
+            // live elapsed-time counter while .recording, or a terminal
+            // resize). Skipped only when NONE of those apply — nothing
+            // changed, the terminal size is the same, and we're not
+            // actively recording:
+            //   - `TUIRenderer` recomputes the recording's elapsed time
+            //     from wall-clock `Date()` at render time (see its one
+            //     `Date()` call, in the `.recording` branch), not from
+            //     anything stored in `state` — so that case must keep
+            //     redrawing every tick even though `state` itself hasn't
+            //     changed since the last frame.
+            //   - Terminal size isn't part of `TUIState` at all, so a
+            //     resize picked up while otherwise fully idle (no keypress,
+            //     no state change) still needs to trigger a redraw.
+            // Every other idle state is fully described by `state` + size,
+            // so if both are identical to what's already on screen,
+            // redrawing would produce byte-identical terminal output. This
+            // used to be unconditional, which meant every idle screen —
+            // including a long transcript sitting open in the viewer with
+            // no keys being pressed — re-ran `renderRecordingsResults`'s
+            // full speaker-turn regrouping and line-wrapping of the entire
+            // transcript+summary roughly 6.7 times/second, forever, for
+            // zero visible benefit.
+            let isActivelyRecording: Bool = {
+                if case .recording = state.record { return true }
+                return false
+            }()
+            let currentSize = terminalSize()
+            let sizeChanged = currentSize.width != lastRenderedWidth || currentSize.height != lastRenderedHeight
+            if isActivelyRecording || state != lastRenderedState || sizeChanged {
+                renderNow()
+            }
 
             // 3. Pace the loop
             try await Task.sleep(for: .milliseconds(150))

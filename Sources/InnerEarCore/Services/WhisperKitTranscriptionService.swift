@@ -65,10 +65,12 @@ public actor WhisperKitTranscriptionService: TranscriptionService {
             // WhisperKit itself does not ship a Parakeet model as of
             // common versions. Surface this as a transcription failure
             // with an actionable message rather than fabricating a
-            // nonexistent WhisperKit API call.
-            throw TranscriptionError.transcriptionFailed(
-                reason: "Parakeet model not yet available via WhisperKit"
-            )
+            // nonexistent WhisperKit API call. Uses the shared protocol-
+            // level helper (see TranscriptionService.unsupportedModelError)
+            // rather than constructing the error inline, so a future second
+            // TranscriptionService implementation gets the same rejection
+            // for free instead of needing to copy this switch case.
+            throw Self.unsupportedModelError(.parakeet)
         }
 
         // Verify the audio file exists on disk before asking WhisperKit
