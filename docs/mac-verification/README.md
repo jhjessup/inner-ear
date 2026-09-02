@@ -2,9 +2,12 @@
 
 This directory is an append-only log of `scripts/verify-on-mac.sh` runs —
 raw output from building, testing, and smoke-checking InnerEar on real Mac
-hardware (Core ML / WhisperKit / SpeakerKit only run for real on a Mac, so
-this project's CI can't cover that surface; a human runs this script on a
-Mac after pulling a branch, see the script header for usage).
+hardware. CI (`.github/workflows/ci.yml`) already runs on real macOS
+runners, but only against fakes, per this project's test doctrine (no real
+Core ML inference or audio hardware in the automated suite) — so it can't
+catch a regression in the actual WhisperKit/SpeakerKit integration or in
+live terminal behavior. A human runs this script on a Mac with real audio
+after pulling a branch for that coverage; see the script header for usage.
 
 These are internal development records, not user-facing documentation —
 kept for project history rather than deleted, but you don't need to read
