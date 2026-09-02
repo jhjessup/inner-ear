@@ -102,24 +102,30 @@ public final class RecordingStore: Sendable {
 
     // MARK: - Recordings/Transcripts listing & deletion
 
+    /// All persisted transcripts, most recently generated first — matches
+    /// `listRecordings()`'s ordering convention.
     public func listTranscripts() throws -> [Transcript] {
         let directory = baseDirectory.appendingPathComponent("transcripts", isDirectory: true)
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }
-        return files.compactMap { url in
+        let transcripts: [Transcript] = files.compactMap { url in
             guard let data = try? Data(contentsOf: url) else { return nil }
             return try? decoder.decode(Transcript.self, from: data)
         }
+        return transcripts.sorted { $0.generatedAt > $1.generatedAt }
     }
 
+    /// All persisted summaries, most recently generated first — matches
+    /// `listRecordings()`'s ordering convention.
     public func listSummaries() throws -> [Summary] {
         let directory = baseDirectory.appendingPathComponent("summaries", isDirectory: true)
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }
-        return files.compactMap { url in
+        let summaries: [Summary] = files.compactMap { url in
             guard let data = try? Data(contentsOf: url) else { return nil }
             return try? decoder.decode(Summary.self, from: data)
         }
+        return summaries.sorted { $0.generatedAt > $1.generatedAt }
     }
 
     public func transcriptFileURL(for transcript: Transcript) -> URL {
