@@ -25,7 +25,7 @@ struct InnerEarCLI: AsyncParsableCommand {
         discussion: """
         All processing runs on-device. No cloud, no accounts, no uploads.
         """,
-        version: "0.1.0",
+        version: "1.0.0",
         subcommands: [
             RecordCommand.self,
             TranscribeCommand.self,
