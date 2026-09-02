@@ -1,0 +1,29 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/6] Write swift-version-29206828342AA87C.txt
+[4/9] Compiling InnerEarCore TranscriptSegment.swift
+[5/9] Emitting module InnerEarCore
+[6/9] Compiling InnerEarCore AVFoundationAudioCaptureService.swift
+/Users/jhjessup/tmp/inner-ear/Sources/InnerEarCore/Services/AVFoundationAudioCaptureService.swift:174:9: [1;31merror: [1;39mcannot assign to value: 'micFileURL' is a 'let' constant[0;0m
+[0;36m172 |[0;0m         internalState = .idle
+[0;36m173 |[0;0m         currentRecordingDirectory = nil
+[0;36m174 |[0;0m         [4;39mmicFileURL[0;0m = nil
+    [0;36m|[0;0m         `- [1;31merror: [1;39mcannot assign to value: 'micFileURL' is a 'let' constant[0;0m
+[0;36m175 |[0;0m         systemAudioFileURL = nil
+[0;36m176 |[0;0m 
+
+/Users/jhjessup/tmp/inner-ear/Sources/InnerEarCore/Services/AVFoundationAudioCaptureService.swift:174:22: [1;31merror: [1;39m'nil' cannot be assigned to type 'URL'[0;0m
+[0;36m172 |[0;0m         internalState = .idle
+[0;36m173 |[0;0m         currentRecordingDirectory = nil
+[0;36m174 |[0;0m         micFileURL = nil
+    [0;36m|[0;0m                      `- [1;31merror: [1;39m'nil' cannot be assigned to type 'URL'[0;0m
+[0;36m175 |[0;0m         systemAudioFileURL = nil
+[0;36m176 |[0;0m 
+[7/16] Compiling InnerEarCore TranscriptionService.swift
+[8/16] Compiling InnerEarCore RecordingStore.swift
+[9/16] Compiling InnerEarCore WhisperKitTranscriptionService.swift
+[10/16] Compiling InnerEarCore FileExportService.swift
+[11/16] Compiling InnerEarCore ExtractiveSummarizationService.swift
+[12/16] Compiling InnerEarCore ChannelBasedDiarizationService.swift
+[13/16] Compiling InnerEarCore Transcript.swift
