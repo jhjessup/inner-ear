@@ -3,3 +3,17 @@
 # repo and symlinked in as .syndicate. Never commit it into this code repo.
 .syndicate
 
+# Swift Package Manager build output (created by `swift build` / `swift test`)
+.build/
+.swiftpm/
+
+# macOS Finder metadata
+.DS_Store
+
+# Xcode, for the optional GUI-wrapper App target described in
+# docs/XCODE_SETUP.md — not part of this package's own build, but common
+# to end up alongside it in a sibling directory during local development.
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+

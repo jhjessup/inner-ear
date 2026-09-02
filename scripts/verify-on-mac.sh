@@ -161,7 +161,15 @@ ensure_working_toolchain() {
 if ! ensure_working_toolchain; then
   echo ""
   echo "Aborting before build/test — toolchain is not in a working state."
-  echo "See $REPAIR_LOG contents (also written into $RESULTS_FILE below)."
+  # Write into docs/mac-verification/ (same destination as the normal run,
+  # see RESULTS_DIR below) instead of the repo root — a root-level
+  # MAC_VERIFY_RESULTS.md previously accumulated here on every repair
+  # failure, which is exactly the kind of process-artifact clutter this
+  # project moved away from by dating every other run under docs/.
+  FAILURE_RESULTS_DIR="$REPO_ROOT/docs/mac-verification"
+  mkdir -p "$FAILURE_RESULTS_DIR"
+  FAILURE_RESULTS_FILE="$FAILURE_RESULTS_DIR/toolchain-repair-failed-$(date -u +%Y%m%dT%H%M%SZ).md"
+  echo "See $REPAIR_LOG contents (also written into $FAILURE_RESULTS_FILE below)."
   {
     echo "# Mac Verification Results — TOOLCHAIN REPAIR FAILED"
     echo ""
@@ -175,8 +183,8 @@ if ! ensure_working_toolchain; then
     echo '```'
     cat "$REPAIR_LOG"
     echo '```'
-  } > "$RESULTS_FILE"
-  git add "$RESULTS_FILE"
+  } > "$FAILURE_RESULTS_FILE"
+  git add "$FAILURE_RESULTS_FILE"
   git commit -m "chore: mac verification — toolchain repair failed ($TIMESTAMP)"
   git push origin "$BRANCH"
   exit 1
