@@ -153,7 +153,13 @@ public final actor AVFoundationAudioCaptureService: AudioCaptureService, Sendabl
         // instead of force-unwrapping means a future refactor that breaks
         // that invariant fails with a normal thrown error instead of
         // crashing the whole process.
-        guard let micFileURL else {
+        //
+        // Bound to a differently-named local (not `guard let micFileURL`)
+        // deliberately: shadowing the property name would make it refer to
+        // this new immutable local for the REST of the function — including
+        // the `micFileURL = nil` reset below, which needs to reach the
+        // actual `var` property, not a `let` shadow of it.
+        guard let resolvedMicFileURL = micFileURL else {
             internalState = .idle
             throw AudioCaptureError.noActiveCapture
         }
@@ -164,7 +170,7 @@ public final actor AVFoundationAudioCaptureService: AudioCaptureService, Sendabl
             title: "Recording \(DateFormatter.recordingTitle.string(from: startedAt))",
             createdAt: startedAt,
             duration: elapsed,
-            microphoneFileURL: micFileURL,
+            microphoneFileURL: resolvedMicFileURL,
             systemAudioFileURL: systemAudioFileURL
         )
 
