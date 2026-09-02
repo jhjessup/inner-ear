@@ -51,7 +51,8 @@ struct TUIControllerTests {
             segments: [
                 TranscriptSegment(speakerID: speaker.id, text: "Hello world", startTime: 0, endTime: 1)
             ],
-            generatedAt: Date()
+            generatedAt: Date(),
+            recordingStartedAt: Date(timeIntervalSince1970: 1_000_000)
         )
     }
 
@@ -97,6 +98,88 @@ struct TUIControllerTests {
         let state = TUIState(focusedPane: .detail, selectedSection: 1)
         let (nextState, effects) = TUIController.reduce(state, .key("\t"))
         #expect(nextState.focusedPane == .navigation)
+        #expect(effects.isEmpty)
+    }
+
+    // MARK: - Left/Right arrows switch focused pane
+
+    @Test
+    func rightArrow_navigationFocused_section0_movesToDetail_noEffects() {
+        let state = TUIState(focusedPane: .navigation, selectedSection: 0)
+        let (nextState, effects) = TUIController.reduce(state, .key(TUIController.rightArrowKey))
+        #expect(nextState.focusedPane == .detail)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func rightArrow_navigationFocused_section1_movesToDetail_andLoadsRecordings() {
+        // Right arrow reuses the exact Enter-in-nav-pane transition (not a
+        // bare focus flip like Tab) because Recordings/Settings only
+        // populate their detail pane via this load effect.
+        let state = TUIState(focusedPane: .navigation, selectedSection: 1)
+        let (nextState, effects) = TUIController.reduce(state, .key(TUIController.rightArrowKey))
+        #expect(nextState.focusedPane == .detail)
+        #expect(effects == [.loadRecordings])
+    }
+
+    @Test
+    func rightArrow_navigationFocused_section2_movesToDetail_andLoadsConfigStatus() {
+        let state = TUIState(focusedPane: .navigation, selectedSection: 2)
+        let (nextState, effects) = TUIController.reduce(state, .key(TUIController.rightArrowKey))
+        #expect(nextState.focusedPane == .detail)
+        #expect(effects == [.loadConfigStatus])
+    }
+
+    @Test
+    func rightArrow_detailFocused_isNoOp() {
+        let state = TUIState(focusedPane: .detail, selectedSection: 0)
+        let (nextState, effects) = TUIController.reduce(state, .key(TUIController.rightArrowKey))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func leftArrow_detailFocused_movesToNavigation_noEffects() {
+        let state = TUIState(focusedPane: .detail, selectedSection: 1)
+        let (nextState, effects) = TUIController.reduce(state, .key(TUIController.leftArrowKey))
+        #expect(nextState.focusedPane == .navigation)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func leftArrow_navigationFocused_isNoOp() {
+        let state = TUIState(focusedPane: .navigation, selectedSection: 0)
+        let (nextState, effects) = TUIController.reduce(state, .key(TUIController.leftArrowKey))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func leftArrow_duringActiveRecording_isSwallowed() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 0,
+            record: .recording(startedAt: Date(), captureSystemAudio: true)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key(TUIController.leftArrowKey))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func leftArrow_doesNotShadowLiteralTypedText_duringSettingsEditing() {
+        // The whole reason Left/Right use PUA sentinels instead of reusing
+        // 'h'/'l' the way Up/Down reuse 'k'/'j': a real 'h' or 'l' keypress
+        // while editing the data-directory path must still append that
+        // literal character, not get hijacked as a pane switch.
+        let state = TUIState(focusedPane: .detail, selectedSection: 2, settings: .editing(currentInput: "/data"))
+        let (nextState, effects) = TUIController.reduce(state, .key("h"))
+        if case .editing(let input) = nextState.settings {
+            #expect(input == "/datah")
+        } else {
+            Issue.record("expected .editing state to persist")
+        }
+        #expect(nextState.focusedPane == .detail)
         #expect(effects.isEmpty)
     }
 
@@ -274,6 +357,148 @@ struct TUIControllerTests {
             settings: .viewing(resolvedPath: "/data", source: .configFile)
         )
         let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.settings == state.settings)
+        #expect(effects.isEmpty)
+    }
+
+    // MARK: - Esc pops exactly one level (regression: used to always jump
+    // to the nav pane regardless of nesting depth). All tests above start
+    // from focusedPane: .navigation, which can never distinguish "stayed
+    // put" from "jumped to nav" since it started there — these start from
+    // the realistic .detail state a user is actually looking at.
+
+    @Test
+    func esc_whileRecordPrompting_fromDetail_popsToIdle_staysInDetail() {
+        let state = TUIState(focusedPane: .detail, selectedSection: 0, record: .prompting)
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.record == .idle)
+        #expect(nextState.focusedPane == .detail)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func esc_whileRecordSaved_fromDetail_popsToIdle_staysInDetail() {
+        let state = TUIState(focusedPane: .detail, selectedSection: 0, record: .saved(makeRecording()))
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.record == .idle)
+        #expect(nextState.focusedPane == .detail)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func esc_whileRecordIdle_fromDetail_exitsToNav() {
+        // .idle is Record's home state — nothing left to pop, so Esc takes
+        // the further step of exiting to the nav pane.
+        let state = TUIState(focusedPane: .detail, selectedSection: 0, record: .idle)
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.record == .idle)
+        #expect(nextState.focusedPane == .navigation)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func esc_whileViewingResults_fromDetail_popsToList_staysInDetail() {
+        // The exact regression this fix addresses: closing the transcript
+        // viewer must land back on the Recordings list still focused in
+        // the detail pane — not kick the user out to the nav column.
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 3)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.focusedPane == .detail)
+        if case .list = nextState.recordings {
+            // ok
+        } else {
+            #expect(Bool(false), "Expected .list after Esc")
+        }
+        #expect(effects == [.loadRecordings])
+    }
+
+    @Test
+    func esc_whileList_fromDetail_exitsToNav() {
+        let entries = makeEntries([makeRecording()])
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .list(entries: entries, selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.focusedPane == .navigation)
+        #expect(nextState.recordings == .list(entries: entries, selectedIndex: 0))
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func esc_whileProcessing_fromDetail_isTrueNoOp_doesNotExitToNav() {
+        // reduceRecordings documents .processing as "no keys do anything
+        // while the pipeline is running" — Esc must not be a silent
+        // exception that yanks focus away mid-pipeline.
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .processing(recording: makeRecording(), statusLine: "Transcribing...", stepIndex: 1)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func esc_whileConfirmGenerateTranscript_fromDetail_popsToList_staysInDetail() {
+        let entries = makeEntries([makeRecording()])
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .confirmGenerateTranscript(entries: entries, selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.focusedPane == .detail)
+        #expect(nextState.recordings == .list(entries: entries, selectedIndex: 0))
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func esc_whileConfirmDelete_fromDetail_popsToList_staysInDetail() {
+        let entries = makeEntries([makeRecording()])
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .confirmDelete(entries: entries, selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.focusedPane == .detail)
+        #expect(nextState.recordings == .list(entries: entries, selectedIndex: 0))
+        #expect(effects.isEmpty)
+    }
+
+    @Test
+    func esc_whileSettingsEditing_fromDetail_popsToViewing_staysInDetail() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .editing(currentInput: "/tmp/newpath")
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.focusedPane == .detail)
+        if case .viewing = nextState.settings {
+            // ok
+        } else {
+            #expect(Bool(false), "Expected .viewing after Esc")
+        }
+        #expect(effects == [.loadConfigStatus])
+    }
+
+    @Test
+    func esc_whileSettingsViewing_fromDetail_exitsToNav() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .viewing(resolvedPath: "/data", source: .configFile)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
+        #expect(nextState.focusedPane == .navigation)
         #expect(nextState.settings == state.settings)
         #expect(effects.isEmpty)
     }
@@ -839,6 +1064,152 @@ struct TUIControllerTests {
         } else {
             #expect(Bool(false))
         }
+    }
+
+    @Test
+    func recordings_viewingResults_space_pagesForward() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 5)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key(" "))
+        if case .viewingResults(_, _, let offset) = nextState.recordings {
+            #expect(offset == 15)
+        } else {
+            #expect(Bool(false))
+        }
+    }
+
+    @Test
+    func recordings_viewingResults_b_pagesBackward_clampsAtZero() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 5)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key("b"))
+        if case .viewingResults(_, _, let offset) = nextState.recordings {
+            #expect(offset == 0)
+        } else {
+            #expect(Bool(false))
+        }
+    }
+
+    @Test
+    func recordings_viewingResults_g_jumpsToTop() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 42)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key("g"))
+        if case .viewingResults(_, _, let offset) = nextState.recordings {
+            #expect(offset == 0)
+        } else {
+            #expect(Bool(false))
+        }
+    }
+
+    @Test
+    func recordings_viewingResults_G_jumpsPastEnd_andSubsequentJDoesNotOverflow() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 0)
+        )
+        let (bottomState, _) = TUIController.reduce(state, .key("G"))
+        guard case .viewingResults(_, _, let bottomOffset) = bottomState.recordings else {
+            #expect(Bool(false))
+            return
+        }
+        #expect(bottomOffset > 1_000_000)
+
+        let (nextState, _) = TUIController.reduce(bottomState, .key("j"))
+        if case .viewingResults(_, _, let offset) = nextState.recordings {
+            #expect(offset == bottomOffset + 1)
+        } else {
+            #expect(Bool(false))
+        }
+    }
+
+    @Test
+    func recordings_viewingResults_pageDownKey_behavesLikeSpace() {
+        // PageDown (ESC[6~) is a distinct PUA sentinel from the literal " "
+        // key, not an alias of it, but both must page forward identically.
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 5)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key(TUIController.pageDownKey))
+        if case .viewingResults(_, _, let offset) = nextState.recordings {
+            #expect(offset == 15)
+        } else {
+            #expect(Bool(false))
+        }
+    }
+
+    @Test
+    func recordings_viewingResults_pageUpKey_behavesLikeB() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 5)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key(TUIController.pageUpKey))
+        if case .viewingResults(_, _, let offset) = nextState.recordings {
+            #expect(offset == 0)
+        } else {
+            #expect(Bool(false))
+        }
+    }
+
+    @Test
+    func recordings_viewingResults_homeKey_jumpsToTop() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 42)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key(TUIController.homeKey))
+        if case .viewingResults(_, _, let offset) = nextState.recordings {
+            #expect(offset == 0)
+        } else {
+            #expect(Bool(false))
+        }
+    }
+
+    @Test
+    func recordings_viewingResults_endKey_jumpsPastEnd() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .viewingResults(transcript: makeTranscript(), summary: nil, scrollOffset: 0)
+        )
+        let (nextState, _) = TUIController.reduce(state, .key(TUIController.endKey))
+        if case .viewingResults(_, _, let offset) = nextState.recordings {
+            #expect(offset > 1_000_000)
+        } else {
+            #expect(Bool(false))
+        }
+    }
+
+    @Test
+    func confirmDelete_pageUpKey_doesNotTriggerDeleteBoth() {
+        // The whole reason PageUp/PageDown got their own PUA sentinels
+        // instead of aliasing the literal 'b'/' ' characters: 'b' means
+        // "delete Both audio and transcript" in this unrelated state. A
+        // PageUp keypress must never be able to fire that.
+        let entries = makeEntries([makeRecording()])
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 1,
+            recordings: .confirmDelete(entries: entries, selectedIndex: 0)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key(TUIController.pageUpKey))
+        #expect(nextState == state)
+        #expect(effects.isEmpty)
     }
 
     @Test

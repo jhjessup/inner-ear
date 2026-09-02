@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import InnerEarTUIKit
 
 /// Raw terminal mode manager. Puts stdin into non-canonical, no-echo mode
 /// on init, and restores the original settings on `restore()` or `deinit`.
@@ -128,11 +129,16 @@ func readKeyNonBlocking() -> Character? {
 /// sequences (`ESC [ A/B/C/D`) and maps Up/Down to the same `'k'`/`'j'`
 /// characters the controller already treats as list-navigation keys — so
 /// no changes were needed in TUIController/TUIRenderer to support arrow
-/// keys. A bare Esc keypress (nothing, or something other than `[`,
-/// follows within this read cycle) is still returned as `"\u{1B}"`
-/// exactly as before. Left/Right arrows are consumed (so their bytes
-/// don't leak into the next frame as stray `'C'`/`'D'` characters) but
-/// produce no key, since this app has no horizontal-list semantics.
+/// keys. Left/Right map to `TUIController.leftArrowKey`/`.rightArrowKey`,
+/// dedicated Private-Use-Area sentinel characters (not reused letters like
+/// 'h'/'l') specifically so the controller can treat them as global,
+/// Tab-like pane-switch keys without ever colliding with literal typed
+/// text (see the case-3.5 comment in `TUIController.reduce(_:_:)`).
+/// PageUp/PageDown/Home/End are the longer `ESC [ <digit> ~` CSI form (not
+/// the 3-byte arrow form) and map to their own PUA sentinels for the same
+/// collision-avoidance reason — see the digit-case comment below. A bare
+/// Esc keypress (nothing, or something other than `[`, follows within this
+/// read cycle) is still returned as `"\u{1B}"` exactly as before.
 func readKeyOrArrowNonBlocking() -> Character? {
     guard let first = readRawByteNonBlocking() else { return nil }
     guard first == 0x1B else {
@@ -163,7 +169,27 @@ func readKeyOrArrowNonBlocking() -> Character? {
     switch third {
     case UInt8(ascii: "A"): return "k"       // Up
     case UInt8(ascii: "B"): return "j"       // Down
-    case UInt8(ascii: "C"), UInt8(ascii: "D"): return nil // Left/Right: consumed, no mapping
+    case UInt8(ascii: "C"): return TUIController.rightArrowKey // Right
+    case UInt8(ascii: "D"): return TUIController.leftArrowKey  // Left
+    case UInt8(ascii: "1"), UInt8(ascii: "4"), UInt8(ascii: "5"), UInt8(ascii: "6"):
+        // PageUp/PageDown/Home/End on most terminals (xterm, iTerm2,
+        // Terminal.app, tmux) are a 4-byte CSI sequence, not the 3-byte
+        // arrow-key form above: `ESC [ <digit> ~`. Without this, e.g.
+        // PageDown's third byte ('6') fell through to the `default` case
+        // below and was misread as a bare Esc — which, inside the
+        // transcript viewer, immediately backs the user out of the view
+        // they were trying to scroll. Consume the expected trailing '~';
+        // if it doesn't arrive (a genuinely different/unsupported
+        // sequence), fall back to bare-Esc rather than misfiring.
+        guard readRawByteNonBlocking() == UInt8(ascii: "~") else {
+            return Character(UnicodeScalar(first))
+        }
+        switch third {
+        case UInt8(ascii: "5"): return TUIController.pageUpKey
+        case UInt8(ascii: "6"): return TUIController.pageDownKey
+        case UInt8(ascii: "1"): return TUIController.homeKey
+        default: return TUIController.endKey // "4"
+        }
     default:
         return Character(UnicodeScalar(first)) // unrecognized sequence — treat as bare Esc
     }
@@ -179,15 +205,29 @@ func rawTerminalWrite(_ s: String) {
     }
 }
 
-/// Write an array of lines to the terminal, clearing the screen first.
-/// Lines are joined with `\r\n` (a separator, not a terminator) because
-/// the terminal is in raw mode. Deliberately no trailing `\r\n` after the
-/// last line: the multipane renderer always emits exactly `height` lines,
-/// so a trailing newline would move the cursor past the bottom row and
-/// force the terminal to scroll on every single redraw — even inside the
-/// alternate screen buffer, this reliably leaked frames into scrollback.
+/// Write an array of lines to the terminal, redrawing the existing frame
+/// in place. Lines are joined with `\r\n` (a separator, not a terminator)
+/// because the terminal is in raw mode. Deliberately no trailing `\r\n`
+/// after the last line: the multipane renderer always emits exactly
+/// `height` lines, so a trailing newline would move the cursor past the
+/// bottom row and force the terminal to scroll on every single redraw —
+/// even inside the alternate screen buffer, this reliably leaked frames
+/// into scrollback.
+///
+/// Deliberately does NOT emit `ESC[2J` (clear entire screen) before
+/// redrawing. A full clear blanks every cell for one frame before the new
+/// content lands, and that blank-then-redraw flash is what many terminal
+/// emulators render as a visible jump/scroll on every update, even though
+/// no actual scrolling happens in the alternate buffer. The renderer
+/// already pads every line to exactly `width` columns and emits exactly
+/// `height` rows, so moving the cursor home (`ESC[H`) and overwriting each
+/// cell with new content is sufficient — nothing is left over from the
+/// previous frame. `ESC[J` (clear from cursor to end of screen) after the
+/// last line only matters immediately after a resize to a shorter frame,
+/// where a stale row from the previous, larger frame could otherwise
+/// survive below the new content.
 func writeToTerminal(_ lines: [String]) {
-    let output = "\u{1B}[2J\u{1B}[H" + lines.joined(separator: "\r\n")
+    let output = "\u{1B}[H" + lines.joined(separator: "\r\n") + "\u{1B}[J"
     rawTerminalWrite(output)
 }
 

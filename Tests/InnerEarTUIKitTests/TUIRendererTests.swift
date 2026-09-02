@@ -32,7 +32,8 @@ struct TUIRendererTests {
             segments: [
                 TranscriptSegment(speakerID: speaker.id, text: "Hello world, this is a test transcript.", startTime: 0, endTime: 2)
             ],
-            generatedAt: Date()
+            generatedAt: Date(),
+            recordingStartedAt: Date(timeIntervalSince1970: 1_000_000)
         )
     }
 
@@ -222,7 +223,7 @@ struct TUIRendererTests {
         let viewFooter = TUIRenderer.footerText(for: viewing)
         #expect(recFooter != viewFooter)
         #expect(recFooter.contains("Stop"))
-        #expect(viewFooter.contains("Scroll"))
+        #expect(viewFooter.contains("Page"))
     }
 
     // MARK: - Modal overlay
@@ -470,7 +471,8 @@ struct TUIRendererTests {
                 TranscriptSegment(speakerID: speaker.id, text: "how are you", startTime: 1, endTime: 2),
                 TranscriptSegment(speakerID: speaker.id, text: "doing today?", startTime: 2, endTime: 3)
             ],
-            generatedAt: Date()
+            generatedAt: Date(),
+            recordingStartedAt: Date(timeIntervalSince1970: 1_000_000)
         )
         let state = TUIState(
             focusedPane: .detail,
@@ -501,7 +503,8 @@ struct TUIRendererTests {
                 TranscriptSegment(speakerID: remote.id, text: "Hey there.", startTime: 1, endTime: 2),
                 TranscriptSegment(speakerID: local.id, text: "How's it going?", startTime: 2, endTime: 3)
             ],
-            generatedAt: Date()
+            generatedAt: Date(),
+            recordingStartedAt: Date(timeIntervalSince1970: 1_000_000)
         )
         let state = TUIState(
             focusedPane: .detail,

@@ -277,7 +277,8 @@ struct ExportServiceTests {
                 TranscriptSegment(speakerID: speaker2.id, text: "Second segment", startTime: 1.5, endTime: 3.0),
                 TranscriptSegment(speakerID: speaker1.id, text: "Third segment", startTime: 3.0, endTime: 4.5)
             ],
-            generatedAt: Date()
+            generatedAt: Date(),
+            recordingStartedAt: Date(timeIntervalSince1970: 1_000_000)
         )
         let destination = tempDir.appendingPathComponent("multi.md")
 

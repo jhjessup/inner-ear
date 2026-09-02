@@ -147,13 +147,30 @@ public final actor AVFoundationAudioCaptureService: AudioCaptureService, Sendabl
             await finalizeSystemAudioFile()
         }
 
+        // micFileURL is set by startCapture(...) before internalState ever
+        // becomes .recording, and the guard above proves we were in
+        // .recording — so this should be unreachable in practice. Guarding
+        // instead of force-unwrapping means a future refactor that breaks
+        // that invariant fails with a normal thrown error instead of
+        // crashing the whole process.
+        //
+        // Bound to a differently-named local (not `guard let micFileURL`)
+        // deliberately: shadowing the property name would make it refer to
+        // this new immutable local for the REST of the function — including
+        // the `micFileURL = nil` reset below, which needs to reach the
+        // actual `var` property, not a `let` shadow of it.
+        guard let resolvedMicFileURL = micFileURL else {
+            internalState = .idle
+            throw AudioCaptureError.noActiveCapture
+        }
+
         // Build Recording struct
         let recording = Recording(
             id: recordingID,
             title: "Recording \(DateFormatter.recordingTitle.string(from: startedAt))",
             createdAt: startedAt,
             duration: elapsed,
-            microphoneFileURL: micFileURL!,
+            microphoneFileURL: resolvedMicFileURL,
             systemAudioFileURL: systemAudioFileURL
         )
 

@@ -183,8 +183,7 @@ public final class ChannelBasedDiarizationService: DiarizationService, @unchecke
                     speakerID: remoteSpeaker.id,
                     text: segment.text,
                     startTime: segment.startTime,
-                    endTime: segment.endTime,
-                    lowConfidenceWordRanges: segment.lowConfidenceWordRanges
+                    endTime: segment.endTime
                 )
             }
             return ([remoteSpeaker], remoteSegments)
@@ -211,8 +210,7 @@ public final class ChannelBasedDiarizationService: DiarizationService, @unchecke
                 speakerID: speaker.id,
                 text: segment.text,
                 startTime: segment.startTime,
-                endTime: segment.endTime,
-                lowConfidenceWordRanges: segment.lowConfidenceWordRanges
+                endTime: segment.endTime
             )
         }
 

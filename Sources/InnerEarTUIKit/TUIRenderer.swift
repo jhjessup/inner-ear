@@ -231,7 +231,8 @@ public enum TUIRenderer {
             return [
                 "Recording saved: \(recording.id.uuidString)",
                 "",
-                "[Enter] Process now"
+                "[Enter] Process now",
+                "[Esc]   Defer — audio is already saved; transcribe later from Recordings"
             ]
         }
     }
@@ -551,7 +552,7 @@ public enum TUIRenderer {
         }
         // Nav-pane focused.
         if state.focusedPane == .navigation {
-            return "[j/k] Select  [Enter] Open  [Tab] Detail  [q] Quit"
+            return "[j/k] Select  [->/Enter] Open  [Tab] Detail  [q] Quit"
         }
         // Detail-pane focused: dispatch on section.
         switch state.selectedSection {
@@ -563,7 +564,7 @@ public enum TUIRenderer {
                 // Enter does nothing here — y/n do — so don't advertise it.
                 return "[y] Yes  [n] No  [Esc] Cancel"
             case .saved:
-                return "[Enter] Process Now  [Tab] Nav  [Esc] Back"
+                return "[Enter] Process Now  [Esc] Defer  [Tab] Nav"
             case .recording:
                 // Already covered above, but defensive.
                 return "[s]/[Esc] Stop"
@@ -577,7 +578,7 @@ public enum TUIRenderer {
             case .confirmDelete:
                 return "[a] Audio  [t] Transcript  [b] Both  [Esc] Cancel"
             case .viewingResults:
-                return "[j/k] Scroll  [e] Export  [Tab] Nav  [Esc] Back"
+                return "[j/k] Line  [space/b] Page  [g/G] Top/Bottom  [e] Export  [Esc] List  [<-] Nav"
             case .processing:
                 return "[Tab] Nav"
             }

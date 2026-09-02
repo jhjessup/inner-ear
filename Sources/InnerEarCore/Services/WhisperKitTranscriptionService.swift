@@ -170,6 +170,25 @@ public actor WhisperKitTranscriptionService: TranscriptionService {
 
     // MARK: - Result mapping
 
+    /// Strips WhisperKit/Whisper special-token markup — `<|...|>` control,
+    /// language, and per-word timestamp tokens such as `<|en|>`,
+    /// `<|0.00|>`, `<|endoftext|>` — that can appear inline in
+    /// `TranscriptionSegment.text` depending on decoding options and
+    /// model/tokenizer version, and collapses whatever whitespace is left
+    /// behind by their removal. Without this, the transcript viewer shows
+    /// raw model tokens as visible noise in what's supposed to be plain
+    /// prose. Pure string logic — no WhisperKit/Core ML dependency — so
+    /// it's directly unit-testable without a real model (see
+    /// `WhisperKitTranscriptionServiceTests`).
+    static func sanitizeSegmentText(_ text: String) -> String {
+        var result = text
+        while let range = result.range(of: #"<\|[^|<>]*\|>"#, options: .regularExpression) {
+            result.removeSubrange(range)
+        }
+        result = result.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Convert WhisperKit's `TranscriptionResult` into our domain `Transcript`.
     /// All segments are attributed to a single default "Speaker 1" (the local
     /// user); real speaker diarization is Phase 4.
@@ -203,7 +222,7 @@ public actor WhisperKitTranscriptionService: TranscriptionService {
             result.segments.map { seg in
                 TranscriptSegment(
                     speakerID: defaultSpeaker.id,
-                    text: seg.text,
+                    text: sanitizeSegmentText(seg.text),
                     startTime: TimeInterval(seg.start),
                     endTime: TimeInterval(seg.end)
                 )
