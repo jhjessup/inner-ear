@@ -12,7 +12,18 @@ let package = Package(
         .library(name: "InnerEarTUIKit", targets: ["InnerEarTUIKit"])
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0"),
+        // Pinned exact, not `from:` — an open range let SwiftPM resolve to
+        // whatever the latest compatible release is at checkout time, and a
+        // newer release's bundled `GenerateManual` build plugin (man-page
+        // generation we don't use) fails to compile under newer Swift
+        // toolchains (missing `import Foundation` for `URL`, plus a
+        // `PluginContext` API mismatch) — SwiftPM compiles every plugin
+        // target in the dependency graph while resolving it, regardless of
+        // whether any target actually uses that plugin, so this blocked
+        // `swift build` entirely before reaching our own code. Pinning to
+        // 1.3.0 (the version this project has always targeted) avoids
+        // whichever newer release carries the broken plugin.
+        .package(url: "https://github.com/apple/swift-argument-parser.git", .exact("1.3.0")),
         // WhisperKit graduated into the Argmax Open-Source SDK at v1.0.0
         // (May 2026): same repo/package, now multi-product (WhisperKit +
         // SpeakerKit + TTSKit) instead of a single WhisperKit-only library.
