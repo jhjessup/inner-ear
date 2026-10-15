@@ -13,17 +13,25 @@ let package = Package(
     ],
     dependencies: [
         // Pinned exact, not `from:` — an open range let SwiftPM resolve to
-        // whatever the latest compatible release is at checkout time, and a
-        // newer release's bundled `GenerateManual` build plugin (man-page
+        // whatever the latest compatible release is at checkout time, and
+        // that release's bundled `GenerateManual` build plugin (man-page
         // generation we don't use) fails to compile under newer Swift
-        // toolchains (missing `import Foundation` for `URL`, plus a
-        // `PluginContext` API mismatch) — SwiftPM compiles every plugin
-        // target in the dependency graph while resolving it, regardless of
-        // whether any target actually uses that plugin, so this blocked
-        // `swift build` entirely before reaching our own code. Pinning to
-        // 1.3.0 (the version this project has always targeted) avoids
-        // whichever newer release carries the broken plugin.
-        .package(url: "https://github.com/apple/swift-argument-parser.git", .exact("1.3.0")),
+        // toolchains. SwiftPM compiles every plugin target in the
+        // dependency graph while resolving it, regardless of whether any
+        // target actually uses that plugin, so this blocked `swift build`
+        // entirely before reaching our own code.
+        //
+        // Specifically: 1.8.0 refactored the plugin's shared code into
+        // `Plugins/GenerateCommon`, switching to a newer `URL`/
+        // `PluginContext` API that doesn't compile on this toolchain
+        // (missing `import Foundation` for `URL`, plus a `pluginWorkDirectory`
+        // vs. `pluginWorkDirectoryURL` mismatch). 1.7.2 — the latest patch
+        // before that refactor — still uses the older `Path`-based API and
+        // satisfies `argmax-oss-swift`'s floor requirement of
+        // `swift-argument-parser` >= 1.7.0 (a plain `1.3.0` floor, tried
+        // first, conflicts with that transitive requirement and fails
+        // resolution outright).
+        .package(url: "https://github.com/apple/swift-argument-parser.git", exact: "1.7.2"),
         // WhisperKit graduated into the Argmax Open-Source SDK at v1.0.0
         // (May 2026): same repo/package, now multi-product (WhisperKit +
         // SpeakerKit + TTSKit) instead of a single WhisperKit-only library.
