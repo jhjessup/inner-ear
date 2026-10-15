@@ -22,6 +22,17 @@ public final actor AVFoundationAudioCaptureService: AudioCaptureService, Sendabl
 
     private var internalState: InternalState = .idle
 
+    // MARK: - Silence Auto-Stop
+
+    private var autoStopSilenceThreshold: TimeInterval?
+    private var lastNonSilentAt: Date = Date()
+    private var silenceWatchdogTask: Task<Void, Never>?
+    /// Set by the silence watchdog when it auto-stops a capture; drained
+    /// (read-then-clear) by `consumeAutoStoppedRecording()`. A plain
+    /// `stopCapture()` call never touches this — the caller already has
+    /// the `Recording` it returns directly.
+    private var pendingAutoStoppedRecording: Recording?
+
     // MARK: - Audio Engine (Microphone)
 
     private let audioEngine = AVAudioEngine()
@@ -66,7 +77,7 @@ public final actor AVFoundationAudioCaptureService: AudioCaptureService, Sendabl
         }
     }
 
-    public func startCapture(captureSystemAudio: Bool) async throws {
+    public func startCapture(captureSystemAudio: Bool, autoStopAfterSilence: TimeInterval?) async throws {
         // Check if already recording
         guard case .idle = internalState else {
             throw AudioCaptureError.captureAlreadyInProgress
@@ -115,10 +126,66 @@ public final actor AVFoundationAudioCaptureService: AudioCaptureService, Sendabl
 
         // Update state
         internalState = .recording(startedAt: Date(), captureSystemAudio: captureSystemAudio, recordingID: recordingID)
+
+        // Arm silence auto-stop, if requested.
+        autoStopSilenceThreshold = autoStopAfterSilence
+        lastNonSilentAt = Date()
+        if let autoStopAfterSilence {
+            startSilenceWatchdog(threshold: autoStopAfterSilence)
+        }
     }
 
     @discardableResult
     public func stopCapture() async throws -> Recording {
+        silenceWatchdogTask?.cancel()
+        silenceWatchdogTask = nil
+        return try await performStop()
+    }
+
+    public func consumeAutoStoppedRecording() async -> Recording? {
+        defer { pendingAutoStoppedRecording = nil }
+        return pendingAutoStoppedRecording
+    }
+
+    /// Polls once a second for `autoStopSilenceThreshold` continuous
+    /// silence on either audio track and, if reached, stops the capture
+    /// itself (stashing the result for `consumeAutoStoppedRecording()`).
+    /// Polling rather than a timer/notification is the simplest correct
+    /// option for an actor-isolated check, and 1s resolution is more than
+    /// enough precision for a threshold measured in minutes.
+    private func startSilenceWatchdog(threshold: TimeInterval) {
+        silenceWatchdogTask?.cancel()
+        silenceWatchdogTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                if Task.isCancelled { return }
+                guard let self else { return }
+                guard await self.silenceThresholdExceeded() else { continue }
+                if let recording = try? await self.performStop() {
+                    await self.storeAutoStoppedRecording(recording)
+                }
+                return
+            }
+        }
+    }
+
+    private func silenceThresholdExceeded() -> Bool {
+        guard case .recording = internalState, let threshold = autoStopSilenceThreshold else { return false }
+        return Date().timeIntervalSince(lastNonSilentAt) >= threshold
+    }
+
+    private func storeAutoStoppedRecording(_ recording: Recording) {
+        pendingAutoStoppedRecording = recording
+    }
+
+    /// The actual stop-and-finalize logic, shared by the public
+    /// `stopCapture()` (which first cancels the silence watchdog) and the
+    /// watchdog itself (which calls this directly — cancelling itself from
+    /// inside its own running Task body would be a no-op anyway, and
+    /// `silenceWatchdogTask` still needs clearing, which `stopCapture()`'s
+    /// path handles; the watchdog path leaves it be since the Task is
+    /// about to end on its own).
+    private func performStop() async throws -> Recording {
         // Must be in recording state
         guard case .recording(let startedAt, let captureSystemAudio, let recordingID) = internalState else {
             throw AudioCaptureError.noActiveCapture
@@ -179,6 +246,7 @@ public final actor AVFoundationAudioCaptureService: AudioCaptureService, Sendabl
         currentRecordingDirectory = nil
         micFileURL = nil
         systemAudioFileURL = nil
+        autoStopSilenceThreshold = nil
 
         return recording
     }
@@ -207,10 +275,33 @@ public final actor AVFoundationAudioCaptureService: AudioCaptureService, Sendabl
 
     private func writeMicBuffer(_ buffer: AVAudioPCMBuffer) async {
         guard let micAudioFile = micAudioFile else { return }
+        trackSilence(for: buffer)
         do {
             try micAudioFile.write(from: buffer)
         } catch {
             print("Error writing microphone buffer: \(error)")
+        }
+    }
+
+    /// Updates `lastNonSilentAt` whenever `buffer`'s RMS amplitude is above
+    /// the silence threshold. No-op when auto-stop-after-silence isn't
+    /// armed for the current capture, so a normal recording pays zero
+    /// extra cost per buffer beyond the nil check. Called from both the
+    /// mic tap and the system-audio stream output — either track having
+    /// audio counts as "not silent", since a meeting with the user quietly
+    /// listening (not talking) is still an active meeting.
+    private func trackSilence(for buffer: AVAudioPCMBuffer) {
+        guard autoStopSilenceThreshold != nil, let channelData = buffer.floatChannelData else { return }
+        let frameCount = Int(buffer.frameLength)
+        guard frameCount > 0 else { return }
+        let channelCount = Int(buffer.format.channelCount)
+        var samples: [Float] = []
+        samples.reserveCapacity(frameCount * channelCount)
+        for channel in 0..<channelCount {
+            samples.append(contentsOf: UnsafeBufferPointer(start: channelData[channel], count: frameCount))
+        }
+        if !AudioSilenceDetector.isSilent(samples) {
+            lastNonSilentAt = Date()
         }
     }
 
@@ -295,6 +386,7 @@ public final actor AVFoundationAudioCaptureService: AudioCaptureService, Sendabl
                     pcmFormat: systemAudioFile.processingFormat,
                     bufferListNoCopy: audioBufferList.unsafePointer
                 ) else { return }
+                trackSilence(for: pcmBuffer)
                 try systemAudioFile.write(from: pcmBuffer)
             }
         } catch {

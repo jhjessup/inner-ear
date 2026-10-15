@@ -22,6 +22,7 @@ struct TUICommand: AsyncParsableCommand {
         )
         let summarization = ExtractiveSummarizationService()
         let export = FileExportService()
+        let audioTrimming = SilenceAudioTrimmingService()
         let store = try RecordingStore()
 
         // Hand off to the run loop
@@ -31,6 +32,7 @@ struct TUICommand: AsyncParsableCommand {
             diarization: diarization,
             summarization: summarization,
             export: export,
+            audioTrimming: audioTrimming,
             store: store
         )
     }

@@ -389,7 +389,7 @@ struct TUIRendererTests {
         )
         let lines = TUIRenderer.render(state: state, width: 80, height: 24)
         let joined = lines.joined(separator: "\n")
-        #expect(joined.contains("Step 2 of 3"))
+        #expect(joined.contains("Step 2 of 4"))
         #expect(joined.contains("█"))
         #expect(joined.contains("["))
         #expect(joined.contains("]"))

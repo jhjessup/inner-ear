@@ -22,10 +22,10 @@ public enum TUIRenderer {
     static let minWidth: Int = 60
     static let minHeight: Int = 18
 
-    /// The pipeline always has exactly 3 phases (transcribe, diarize,
-    /// summarize) — kept as a constant here rather than stored per-state,
-    /// since it never varies.
-    static let processingTotalSteps: Int = 3
+    /// The pipeline always has exactly 4 phases (trim silence, transcribe,
+    /// diarize, summarize) — kept as a constant here rather than stored
+    /// per-state, since it never varies.
+    static let processingTotalSteps: Int = 4
 
     /// Render the current state to a line array bounded by `width` × `height`.
     ///
@@ -497,7 +497,7 @@ public enum TUIRenderer {
     /// animate *during* a phase would need a background redraw Task and
     /// would sit visibly frozen the instant that Task wasn't actually
     /// running, which is worse than no animation at all. What CAN be shown
-    /// honestly is which of the 3 known phases has started — real,
+    /// honestly is which of the 4 known phases has started — real,
     /// non-fabricated progress — updated at each of the render calls that
     /// already happen when a phase begins.
     private static func renderProgressBar(stepIndex: Int, width: Int) -> String {

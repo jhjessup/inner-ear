@@ -30,6 +30,7 @@ model," and here that's a feature, not a smell:
 | Protocol | Verb | Implementation |
 |---|---|---|
 | `AudioCaptureService` | `startCapture` / `stopCapture` | `AVFoundationAudioCaptureService` |
+| `AudioTrimmingService` | `trimSilence` | `SilenceAudioTrimmingService` |
 | `TranscriptionService` | `transcribe` | `WhisperKitTranscriptionService` |
 | `DiarizationService` | `diarize` | `ChannelBasedDiarizationService` |
 | `SummarizationService` | `summarize` / `chat` | `ExtractiveSummarizationService` |

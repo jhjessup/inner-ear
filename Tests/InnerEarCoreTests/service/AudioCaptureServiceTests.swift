@@ -28,6 +28,15 @@ struct AudioCaptureServiceTests {
         }
     }
 
+    @Test
+    func consumeAutoStoppedRecording_whenNothingAutoStopped_returnsNil() async throws {
+        let service = try AVFoundationAudioCaptureService()
+
+        let result = await service.consumeAutoStoppedRecording()
+
+        #expect(result == nil)
+    }
+
     // MARK: - Hardware-gated tests
 
     @Test(.enabled(if: ProcessInfo.processInfo.environment["INNEREAR_HW_TESTS"] == "1"))
@@ -66,5 +75,27 @@ struct AudioCaptureServiceTests {
 
         // Clean up so the test doesn't leave a dangling recording session.
         _ = try await service.stopCapture()
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["INNEREAR_HW_TESTS"] == "1"))
+    func startCapture_withShortSilenceThreshold_autoStopsAndIsConsumableOnce() async throws {
+        let service = try AVFoundationAudioCaptureService()
+
+        try await service.startCapture(captureSystemAudio: false, autoStopAfterSilence: 1.0)
+
+        // The watchdog polls once a second; give it time to notice the
+        // threshold and auto-stop. No real sound is expected on a CI/test
+        // host, so the mic channel should read as continuous silence.
+        try await Task.sleep(for: .seconds(4))
+
+        let autoStopped = await service.consumeAutoStoppedRecording()
+        #expect(autoStopped != nil)
+
+        // Drained, not re-readable.
+        let secondRead = await service.consumeAutoStoppedRecording()
+        #expect(secondRead == nil)
+
+        let state = await service.state
+        #expect(state == .idle)
     }
 }

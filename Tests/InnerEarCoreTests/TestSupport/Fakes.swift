@@ -16,7 +16,7 @@ final class FakeAudioCaptureService: AudioCaptureService, @unchecked Sendable {
     var startCaptureError: Error?
     var stopCaptureError: Error?
 
-    func startCapture(captureSystemAudio: Bool) async throws {
+    func startCapture(captureSystemAudio: Bool, autoStopAfterSilence: TimeInterval?) async throws {
         startCaptureCalls.append(captureSystemAudio)
         if let startCaptureError { throw startCaptureError }
         stubbedState = .recording(elapsed: 0)
@@ -26,6 +26,10 @@ final class FakeAudioCaptureService: AudioCaptureService, @unchecked Sendable {
         if let stopCaptureError { throw stopCaptureError }
         stubbedState = .idle
         return stubbedRecording
+    }
+
+    func consumeAutoStoppedRecording() async -> Recording? {
+        nil
     }
 
     var state: CaptureState {

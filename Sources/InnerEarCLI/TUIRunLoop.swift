@@ -9,12 +9,21 @@ import InnerEarTUIKit
 /// `TUIController.reduce`, and then executes any returned effects
 /// (`TUIEffect` values), updating state based on their async results.
 enum TUIRunLoop {
+    /// How long of continuous silence (no speech on mic or system audio)
+    /// before an in-progress recording auto-stops itself. Generous on
+    /// purpose: long enough that a normal pause in conversation, or
+    /// someone muting briefly to think, never trips it, but short enough
+    /// that a recording left running after a meeting actually ends doesn't
+    /// just grow forever.
+    private static let silenceAutoStopThreshold: TimeInterval = 180 // 3 minutes
+
     static func run(
         audioCapture: AVFoundationAudioCaptureService,
         transcription: WhisperKitTranscriptionService,
         diarization: ChannelBasedDiarizationService,
         summarization: ExtractiveSummarizationService,
         export: FileExportService,
+        audioTrimming: SilenceAudioTrimmingService,
         store: RecordingStore
     ) async throws {
         let rawMode = try RawTerminalMode()
@@ -112,7 +121,10 @@ enum TUIRunLoop {
                     do {
                         switch effect {
                         case .startRecording(let captureSystemAudio):
-                            try await audioCapture.startCapture(captureSystemAudio: captureSystemAudio)
+                            try await audioCapture.startCapture(
+                                captureSystemAudio: captureSystemAudio,
+                                autoStopAfterSilence: silenceAutoStopThreshold
+                            )
 
                         case .stopRecording:
                             let recording = try await audioCapture.stopCapture()
@@ -125,9 +137,23 @@ enum TUIRunLoop {
                             state.recordings = .list(entries: entries, selectedIndex: 0)
                             renderNow()
 
-                        case .runPipeline(let recording):
+                        case .runPipeline(let originalRecording):
+                            // Trim silence — runs before transcription so a
+                            // long silent lead-in/tail neither slows down
+                            // on-device decoding nor skews segment
+                            // timestamps. Persisted immediately (new
+                            // duration/createdAt) so the catalog reflects
+                            // the trimmed recording even if a later phase
+                            // fails.
+                            state.recordings = .processing(recording: originalRecording, statusLine: "Trimming silence...", stepIndex: 1)
+                            renderNow()
+                            let recording = try await audioTrimming.trimSilence(recording: originalRecording)
+                            if recording != originalRecording {
+                                try? storeBox.store.save(recording)
+                            }
+
                             // Transcribe
-                            state.recordings = .processing(recording: recording, statusLine: "Transcribing...", stepIndex: 1)
+                            state.recordings = .processing(recording: recording, statusLine: "Transcribing...", stepIndex: 2)
                             renderNow()
                             let progressThrottle = ProgressRenderThrottle(minInterval: 0.2)
                             let transcript = try await transcription.transcribe(
@@ -148,7 +174,7 @@ enum TUIRunLoop {
                                         recordings: .processing(
                                             recording: recording,
                                             statusLine: "Transcribing... (\(wordCount) words so far)",
-                                            stepIndex: 1
+                                            stepIndex: 2
                                         )
                                     )
                                     let size = terminalSize()
@@ -158,7 +184,7 @@ enum TUIRunLoop {
                             )
 
                             // Diarize
-                            state.recordings = .processing(recording: recording, statusLine: "Diarizing...", stepIndex: 2)
+                            state.recordings = .processing(recording: recording, statusLine: "Diarizing...", stepIndex: 3)
                             renderNow()
                             let diarizedTranscript = try await diarization.diarize(
                                 transcript: transcript,
@@ -166,7 +192,7 @@ enum TUIRunLoop {
                             )
 
                             // Summarize
-                            state.recordings = .processing(recording: recording, statusLine: "Summarizing...", stepIndex: 3)
+                            state.recordings = .processing(recording: recording, statusLine: "Summarizing...", stepIndex: 4)
                             renderNow()
                             let summary = try await summarization.summarize(transcript: diarizedTranscript)
 
@@ -295,6 +321,20 @@ enum TUIRunLoop {
                         renderNow()
                     }
                 }
+            }
+
+            // 1.5. Notice a silence-triggered auto-stop. `audioCapture`
+            // stops itself internally (see
+            // `AVFoundationAudioCaptureService`'s silence watchdog) without
+            // any effect/keypress driving it, so this run loop has no other
+            // way to learn it happened — polled every iteration (same
+            // ~150ms cadence as the idle render below) rather than only
+            // while `state.record == .recording`, since by the time an
+            // auto-stop is noticed the capture has already gone idle.
+            if let autoStopped = await audioCapture.consumeAutoStoppedRecording() {
+                try? storeBox.store.save(autoStopped)
+                state.record = .saved(autoStopped)
+                renderNow()
             }
 
             // 2. Render (covers idle-state updates with no keypress, e.g. the
