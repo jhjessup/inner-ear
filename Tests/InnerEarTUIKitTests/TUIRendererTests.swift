@@ -763,7 +763,27 @@ struct TUIRendererTests {
         let lines = TUIRenderer.render(state: state, width: 80, height: 24)
         let joined = lines.joined(separator: "\n")
         #expect(joined.contains("automatic"))
-        #expect(joined.contains("background"))
+        #expect(joined.contains("runs after recording"))
+        #expect(joined.contains("[m] Cycle transcription mode"))
+    }
+
+    @Test
+    func settings_viewing_automaticMode_atMinimumWidth_stillRendersWholeWords() {
+        // Regression guard: `pad()` hard-truncates at the detail pane's
+        // width with no wrapping/ellipsis, so content here must fit even
+        // at `TUIRenderer.minWidth` (60) — not just the comfortable 80
+        // used by most tests. This caught a real bug: an earlier, longer
+        // combined description line truncated "background" to "backgrou"
+        // at width 80, and would have been worse at the narrower minimum.
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .viewing(resolvedPath: "/data/inner", source: .configFile, transcriptionMode: .automatic)
+        )
+        let lines = TUIRenderer.render(state: state, width: TUIRenderer.minWidth, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("automatic"))
+        #expect(joined.contains("runs after recording"))
         #expect(joined.contains("[m] Cycle transcription mode"))
     }
 

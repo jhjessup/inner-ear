@@ -514,15 +514,22 @@ public enum TUIRenderer {
     private static func renderSettingsDetail(state: TUIState, width: Int) -> [String] {
         switch state.settings {
         case .viewing(let resolvedPath, let source, let transcriptionMode):
+            // Lines kept short and split rather than combined — `pad()`
+            // hard-truncates at `width` with no wrapping/ellipsis, and the
+            // detail pane can be as narrow as 35 chars (minWidth == 60),
+            // so a single long combined line risks silently cutting a word
+            // in half rather than just looking a bit sparse.
             return [
                 "Data directory:",
                 "  \(resolvedPath)",
                 "",
                 "Source: \(sourceDescription(source))",
                 "",
-                "Transcription: \(transcriptionModeDescription(transcriptionMode))",
+                "Transcription: \(transcriptionModeLabel(transcriptionMode))",
+                "  \(transcriptionModeDetail(transcriptionMode))",
                 "",
-                "[e] Edit data directory   [m] Cycle transcription mode"
+                "[e] Edit directory",
+                "[m] Cycle transcription mode"
             ]
         case .editing(let currentInput):
             return [
@@ -542,12 +549,23 @@ public enum TUIRenderer {
         }
     }
 
-    /// Human-readable description of a `TranscriptionMode`.
-    private static func transcriptionModeDescription(_ mode: TranscriptionMode) -> String {
+    /// Short label for a `TranscriptionMode` — kept to a single word so it
+    /// never risks truncation even at the narrowest supported detail pane.
+    private static func transcriptionModeLabel(_ mode: TranscriptionMode) -> String {
         switch mode {
-        case .disabled:  return "disabled — generate transcripts manually from Recordings"
-        case .manual:    return "manual — generate transcripts manually from Recordings"
-        case .automatic: return "automatic — transcribes in the background after each recording"
+        case .disabled:  return "disabled"
+        case .manual:    return "manual"
+        case .automatic: return "automatic"
+        }
+    }
+
+    /// One-line elaboration of what `transcriptionModeLabel` means,
+    /// rendered on its own row — see `renderSettingsDetail`'s comment on
+    /// why this is split out rather than combined into one longer line.
+    private static func transcriptionModeDetail(_ mode: TranscriptionMode) -> String {
+        switch mode {
+        case .disabled, .manual: return "generate manually"
+        case .automatic:         return "runs after recording"
         }
     }
 
