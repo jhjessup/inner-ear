@@ -8,8 +8,11 @@ import InnerEarCore
 /// `RecordingStoreTests` for the `Recording`-side equivalent and
 /// `RecordingDeletionIntegrationTests` for the cross-store MTM-6 flow.
 ///
-/// Same hermetic-via-`INNEREAR_DATA_DIR`-env-var and `@Suite(.serialized)`
-/// rationale as `RecordingStoreTests` — see that file's doc comment.
+/// Same hermetic-via-`INNEREAR_DATA_DIR`-env-var rationale as
+/// `RecordingStoreTests`, and nested under `DataDirectoryTests` for the
+/// same reason — see that type's doc comment.
+extension DataDirectoryTests {
+
 @Suite(.serialized)
 struct TranscriptStoreTests {
 
@@ -157,4 +160,6 @@ struct TranscriptStoreTests {
         let loaded = try store.loadSummary(id: unrelatedSummary.id)
         #expect(loaded == unrelatedSummary)
     }
+}
+
 }

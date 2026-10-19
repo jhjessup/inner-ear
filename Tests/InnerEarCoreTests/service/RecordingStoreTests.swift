@@ -21,14 +21,13 @@ import InnerEarCore
 /// documented override mechanism `InnerEarConfigResolver` supports for
 /// exactly this purpose (see its doc comment).
 ///
-/// `@Suite(.serialized)`: Swift Testing runs a suite's tests concurrently
-/// by default. Since every test in this file shares one process-wide env
-/// var (and therefore one temp directory), concurrent execution would be
-/// a real data race — one test's `setenv` could change the directory out
-/// from under another test mid-run. Forcing serial execution avoids that;
-/// it's cheap here since these tests are small, fast, real-filesystem
-/// tests, not the kind of large parallel suite serialization would slow
-/// down noticeably.
+/// Nested under `DataDirectoryTests` (not a bare top-level `@Suite`) — see
+/// that type's doc comment for why: `.serialized` alone on this suite
+/// isn't enough, since it doesn't serialize against the OTHER suites
+/// (`TranscriptStoreTests`, `RecordingDeletionIntegrationTests`) that also
+/// mutate the same process-wide env var.
+extension DataDirectoryTests {
+
 @Suite(.serialized)
 struct RecordingStoreTests {
 
@@ -165,4 +164,6 @@ struct RecordingStoreTests {
             try store.loadRecording(id: recording.id)
         }
     }
+}
+
 }

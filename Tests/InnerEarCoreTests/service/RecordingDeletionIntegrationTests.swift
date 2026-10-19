@@ -10,7 +10,10 @@ import InnerEarCore
 /// together, pointed at the same data directory, since that's how
 /// `TUIRunLoop` actually drives a delete in practice — see
 /// `RecordingStoreTests`/`TranscriptStoreTests` for the narrower per-store
-/// tests.
+/// tests. Nested under `DataDirectoryTests` — see that type's doc comment
+/// for why (shared process-wide `INNEREAR_DATA_DIR` env var).
+extension DataDirectoryTests {
+
 @Suite(.serialized)
 struct RecordingDeletionIntegrationTests {
 
@@ -80,4 +83,6 @@ struct RecordingDeletionIntegrationTests {
         #expect(try transcriptStore.listTranscripts().isEmpty)
         #expect(try transcriptStore.listSummaries().isEmpty)
     }
+}
+
 }
