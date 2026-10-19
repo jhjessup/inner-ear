@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import InnerEarCore
+@testable import InnerEarTranscription
 
 /// Tests for the concrete `ExtractiveSummarizationService` implementation
 /// (Phase 5 — extractive summarization, no ML, no network).

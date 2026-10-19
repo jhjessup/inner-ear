@@ -22,11 +22,16 @@ The targets:
   `innerear tui` is the primary interface; `record`/`transcribe`/`export`
   are lower-level, non-interactive subcommands for scripting (see the
   root `README.md`).
-- **`InnerEarCore`** — the protocol-based engine: real
-  `AVFoundation`/`ScreenCaptureKit`-backed audio capture, `WhisperKit`
-  transcription, `SpeakerKit` diarization, extractive summarization, and
-  multi-format export, all behind protocols with one fake each for tests
-  (see `ARCHITECTURE.md`).
+- **`InnerEarRecording`** — real `AVFoundation`/`ScreenCaptureKit`-backed
+  audio capture and the `Recording` model/store, behind protocols with one
+  fake each for tests. Deliberately has no dependency on WhisperKit/
+  SpeakerKit (see `ARCHITECTURE.md`'s "Module boundaries" section).
+- **`InnerEarTranscription`** — `WhisperKit` transcription, `SpeakerKit`
+  diarization, extractive summarization, and multi-format export, same
+  protocol-per-capability-plus-fake shape.
+- **`InnerEarCore`** — just the shared kernel both of the above build on:
+  data-directory config resolution and the generic JSON-disk persistence
+  helper. No domain models/services live here.
 - **`InnerEarTUIKit`** — the pure TUI state machine and renderer
   (functional core), exercised by the impure shell in `InnerEarCLI`.
 
@@ -44,27 +49,28 @@ use — expect a real download and a pause the first time you record or
 transcribe something. `record`/`transcribe`/`export` also work as
 standalone, non-interactive subcommands; see the root `README.md`.
 
-## 2. Optional: wrap InnerEarCore in a macOS GUI App (Xcode, for App Store distribution)
+## 2. Optional: wrap InnerEar in a macOS GUI App (Xcode, for App Store distribution)
 
 1. Xcode → File → New → Project → macOS → App.
 2. Product Name: `InnerEar`. Interface: SwiftUI. Language: Swift.
 3. Save it as a sibling folder, e.g. `inner-ear/App/`, or anywhere convenient
    — it does not need to be inside `Sources/`.
 4. File → Add Package Dependencies → Add Local... → select the `inner-ear/`
-   directory (the one with `Package.swift`). Add `InnerEarCore` as a
-   dependency of the App target (not `InnerEarCLI` — that's terminal-only).
+   directory (the one with `Package.swift`). Add `InnerEarRecording` and
+   `InnerEarTranscription` as dependencies of the App target (not
+   `InnerEarCLI` — that's terminal-only).
 5. Replace the generated `InnerEarApp.swift` with something like:
 
    ```swift
    import SwiftUI
-   import InnerEarCore
+   import InnerEarRecording
+   import InnerEarTranscription
 
    @main
    struct InnerEarApp: App {
        var body: some Scene {
            WindowGroup {
-               // Wire the same real service implementations from InnerEarCore
-               // used by the CLI.
+               // Wire the same real service implementations used by the CLI.
                Text("Wire real services here")
            }
        }

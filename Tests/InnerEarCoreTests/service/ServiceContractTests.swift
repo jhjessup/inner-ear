@@ -1,6 +1,7 @@
 import Foundation
 import Testing
-@testable import InnerEarCore
+@testable import InnerEarRecording
+@testable import InnerEarTranscription
 
 // @service — exercises each service protocol directly (not through the TUI layer),
 // per TEST_DOCTRINE.md AX-P4. These use fakes now; once real WhisperKit/Core ML-backed

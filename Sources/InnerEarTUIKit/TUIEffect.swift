@@ -1,5 +1,6 @@
 import Foundation
-import InnerEarCore
+import InnerEarRecording
+import InnerEarTranscription
 
 public enum TUIEffect: Equatable, Sendable {
     case startRecording(captureSystemAudio: Bool)

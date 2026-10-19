@@ -1,11 +1,11 @@
 import Foundation
 import Testing
-@testable import InnerEarCore
+import InnerEarCore
+@testable import InnerEarRecording
 
 /// Tests for the concrete `RecordingStore` persistence layer — save/load
-/// round-trips, list ordering, and deletion (including MTM-6: "deleting a
-/// recording removes both its audio file and its persisted metadata/
-/// transcript — no orphaned files remain on disk").
+/// round-trips, list ordering, and deletion of `Recording` catalog entries
+/// and audio files.
 ///
 /// Unlike every other `@service` test in this project, this one does NOT
 /// use a fake — `RecordingStore` IS the thing under test, and its whole
@@ -21,14 +21,13 @@ import Testing
 /// documented override mechanism `InnerEarConfigResolver` supports for
 /// exactly this purpose (see its doc comment).
 ///
-/// `@Suite(.serialized)`: Swift Testing runs a suite's tests concurrently
-/// by default. Since every test in this file shares one process-wide env
-/// var (and therefore one temp directory), concurrent execution would be
-/// a real data race — one test's `setenv` could change the directory out
-/// from under another test mid-run. Forcing serial execution avoids that;
-/// it's cheap here since these tests are small, fast, real-filesystem
-/// tests, not the kind of large parallel suite serialization would slow
-/// down noticeably.
+/// Nested under `DataDirectoryTests` (not a bare top-level `@Suite`) — see
+/// that type's doc comment for why: `.serialized` alone on this suite
+/// isn't enough, since it doesn't serialize against the OTHER suites
+/// (`TranscriptStoreTests`, `RecordingDeletionIntegrationTests`) that also
+/// mutate the same process-wide env var.
+extension DataDirectoryTests {
+
 @Suite(.serialized)
 struct RecordingStoreTests {
 
@@ -72,37 +71,7 @@ struct RecordingStoreTests {
         )
     }
 
-    private func makeTranscript(
-        recordingID: UUID = UUID(),
-        generatedAt: Date = Date(timeIntervalSince1970: 1_000_000)
-    ) -> Transcript {
-        let speaker = TestFixtures.speaker()
-        return Transcript(
-            recordingID: recordingID,
-            languageCode: "en",
-            modelUsed: TranscriptionModel.whisperLargeV3Turbo.rawValue,
-            speakers: [speaker],
-            segments: [
-                TranscriptSegment(speakerID: speaker.id, text: "Hello world", startTime: 0, endTime: 1)
-            ],
-            generatedAt: generatedAt,
-            recordingStartedAt: generatedAt
-        )
-    }
-
-    private func makeSummary(transcriptID: UUID, generatedAt: Date = Date(timeIntervalSince1970: 1_000_000)) -> Summary {
-        Summary(
-            transcriptID: transcriptID,
-            overview: "A short meeting.",
-            keyPoints: ["Point one"],
-            decisions: [],
-            actionItems: [],
-            generatedByModel: "extractive-v1",
-            generatedAt: generatedAt
-        )
-    }
-
-    // MARK: - Recording save/load round-trip
+    // MARK: - Save/load round-trip
 
     @Test
     func saveRecording_thenLoadByID_returnsEquivalentRecording() throws {
@@ -161,78 +130,8 @@ struct RecordingStoreTests {
         #expect(listed.map(\.id) == [good.id])
     }
 
-    // MARK: - Transcript save/load round-trip
+    // MARK: - Deletion
 
-    @Test
-    func saveTranscript_thenLoadByID_returnsEquivalentTranscript() throws {
-        let store = try makeStore()
-        let transcript = makeTranscript()
-
-        try store.save(transcript)
-        let loaded = try store.loadTranscript(id: transcript.id)
-
-        #expect(loaded == transcript)
-    }
-
-    @Test
-    func listTranscripts_returnsMostRecentlyGeneratedFirst() throws {
-        let store = try makeStore()
-        let older = makeTranscript(generatedAt: Date(timeIntervalSince1970: 1_000_000))
-        let newer = makeTranscript(generatedAt: Date(timeIntervalSince1970: 2_000_000))
-
-        try store.save(older)
-        try store.save(newer)
-
-        let listed = try store.listTranscripts()
-
-        #expect(listed.map(\.id) == [newer.id, older.id])
-    }
-
-    // MARK: - Summary save/load round-trip
-
-    @Test
-    func saveSummary_thenLoadByID_returnsEquivalentSummary() throws {
-        let store = try makeStore()
-        let summary = makeSummary(transcriptID: UUID())
-
-        try store.save(summary)
-        let loaded = try store.loadSummary(id: summary.id)
-
-        #expect(loaded == summary)
-    }
-
-    @Test
-    func listSummaries_returnsMostRecentlyGeneratedFirst() throws {
-        let store = try makeStore()
-        let older = makeSummary(transcriptID: UUID(), generatedAt: Date(timeIntervalSince1970: 1_000_000))
-        let newer = makeSummary(transcriptID: UUID(), generatedAt: Date(timeIntervalSince1970: 2_000_000))
-
-        try store.save(older)
-        try store.save(newer)
-
-        let listed = try store.listSummaries()
-
-        #expect(listed.map(\.id) == [newer.id, older.id])
-    }
-
-    // MARK: - transcriptFileURL
-
-    @Test
-    func transcriptFileURL_matchesWhereSaveActuallyWrites() throws {
-        let store = try makeStore()
-        let transcript = makeTranscript()
-        try store.save(transcript)
-
-        let url = store.transcriptFileURL(for: transcript)
-
-        #expect(FileManager.default.fileExists(atPath: url.path))
-    }
-
-    // MARK: - Deletion (MTM-6: no orphaned files after delete)
-
-    /// Satisfies TEST_DOCTRINE.md MTM-6: "Deleting a recording removes both
-    /// its audio file and its persisted metadata/transcript — no orphaned
-    /// files remain on disk."
     @Test
     func deleteAudioFiles_removesMicAndSystemAudioFiles_andContainingDirectory() throws {
         let store = try makeStore()
@@ -254,43 +153,6 @@ struct RecordingStoreTests {
     }
 
     @Test
-    func deleteTranscript_removesTranscriptFile_andLinkedSummary_noOrphans() throws {
-        let store = try makeStore()
-        let transcript = makeTranscript()
-        let summary = makeSummary(transcriptID: transcript.id)
-        try store.save(transcript)
-        try store.save(summary)
-
-        let transcriptURL = store.transcriptFileURL(for: transcript)
-        #expect(FileManager.default.fileExists(atPath: transcriptURL.path))
-
-        try store.deleteTranscript(transcript)
-
-        #expect(!FileManager.default.fileExists(atPath: transcriptURL.path))
-        // The linked summary (matched via transcriptID) must be gone too —
-        // otherwise it's an orphan pointing at a transcript that no longer
-        // exists.
-        #expect(throws: RecordingStoreError.notFound(summary.id)) {
-            try store.loadSummary(id: summary.id)
-        }
-    }
-
-    @Test
-    func deleteTranscript_doesNotDeleteUnrelatedSummary() throws {
-        let store = try makeStore()
-        let transcript = makeTranscript()
-        let unrelatedSummary = makeSummary(transcriptID: UUID()) // different transcriptID
-        try store.save(transcript)
-        try store.save(unrelatedSummary)
-
-        try store.deleteTranscript(transcript)
-
-        // A summary NOT linked to the deleted transcript must survive.
-        let loaded = try store.loadSummary(id: unrelatedSummary.id)
-        #expect(loaded == unrelatedSummary)
-    }
-
-    @Test
     func deleteRecordingCatalogEntry_removesRecordingMetadataFile() throws {
         let store = try makeStore()
         let recording = makeRecording()
@@ -302,28 +164,6 @@ struct RecordingStoreTests {
             try store.loadRecording(id: recording.id)
         }
     }
+}
 
-    @Test
-    func fullDeleteFlow_recordingAudioTranscriptSummary_leavesNoOrphans() throws {
-        // End-to-end version of MTM-6: delete every artifact belonging to
-        // one recording (catalog entry, audio files, transcript, and its
-        // linked summary) and confirm nothing is left on disk anywhere.
-        let store = try makeStore()
-        let recording = makeRecording(hasSystemAudio: true)
-        let transcript = makeTranscript(recordingID: recording.id)
-        let summary = makeSummary(transcriptID: transcript.id)
-        try store.save(recording)
-        try store.save(transcript)
-        try store.save(summary)
-
-        try store.deleteAudioFiles(for: recording)
-        try store.deleteTranscript(transcript)
-        try store.deleteRecordingCatalogEntry(recording.id)
-
-        #expect(!FileManager.default.fileExists(atPath: recording.microphoneFileURL.path))
-        #expect(!FileManager.default.fileExists(atPath: recording.systemAudioFileURL!.path))
-        #expect(try store.listRecordings().isEmpty)
-        #expect(try store.listTranscripts().isEmpty)
-        #expect(try store.listSummaries().isEmpty)
-    }
 }

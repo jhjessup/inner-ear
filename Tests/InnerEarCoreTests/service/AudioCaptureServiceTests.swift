@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import InnerEarCore
+@testable import InnerEarRecording
 
 /// Tests for the concrete `AVFoundationAudioCaptureService` implementation.
 ///

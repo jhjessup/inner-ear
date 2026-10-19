@@ -1,4 +1,5 @@
 import Foundation
+import InnerEarRecording
 
 /// Which on-device transcription model to use. Mirrors the tradeoff Thoth
 /// exposes: Whisper Large V3 Turbo (accuracy) vs. Parakeet (speed).

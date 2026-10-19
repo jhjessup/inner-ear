@@ -1,5 +1,6 @@
 import Foundation
-import InnerEarCore
+import InnerEarRecording
+import InnerEarTranscription
 
 public struct TUIState: Equatable, Sendable {
     public var focusedPane: Pane

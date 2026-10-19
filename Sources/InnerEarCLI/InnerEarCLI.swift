@@ -1,6 +1,8 @@
 import ArgumentParser
 import Foundation
 import InnerEarCore
+import InnerEarRecording
+import InnerEarTranscription
 import InnerEarTUIKit
 
 /// Top-level command for the `innerear` CLI.
@@ -184,7 +186,7 @@ struct TranscribeCommand: AsyncParsableCommand {
         }
 
         do {
-            let store = try RecordingStore()
+            let store = try TranscriptStore()
             try store.save(transcript)
         } catch {
             print("Error saving transcript: \(error)")
@@ -196,7 +198,7 @@ struct TranscribeCommand: AsyncParsableCommand {
     }
 }
 
-/// Export format for CLI (matches ExportFormat from InnerEarCore).
+/// Export format for CLI (matches ExportFormat from InnerEarTranscription).
 enum ExportFormatCLI: String, ExpressibleByArgument, CaseIterable {
     case pdf
     case markdown
@@ -236,7 +238,7 @@ struct ExportCommand: AsyncParsableCommand {
             throw ExitCode(1)
         }
 
-        let store = try RecordingStore()
+        let store = try TranscriptStore()
         let exportService = FileExportService()
 
         // Load transcript by treating the recording-id argument AS the transcript's own UUID

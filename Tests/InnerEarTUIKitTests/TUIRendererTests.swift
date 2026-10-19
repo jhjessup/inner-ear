@@ -1,7 +1,8 @@
 import Foundation
 import Testing
 @testable import InnerEarTUIKit
-import InnerEarCore
+import InnerEarRecording
+import InnerEarTranscription
 
 /// Tests for the pure `TUIRenderer.render` function.
 ///

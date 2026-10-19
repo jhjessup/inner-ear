@@ -1,5 +1,6 @@
 import Foundation
-@testable import InnerEarCore
+@testable import InnerEarRecording
+@testable import InnerEarTranscription
 
 // Shared test doubles for all InnerEarCoreTests targets — see TEST_DOCTRINE.md AX-P5.
 // None of these touch real audio hardware, Core ML, the network, or the filesystem.

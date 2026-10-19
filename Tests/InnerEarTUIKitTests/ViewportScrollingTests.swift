@@ -1,7 +1,8 @@
 import Foundation
 import Testing
 @testable import InnerEarTUIKit
-import InnerEarCore
+import InnerEarRecording
+import InnerEarTranscription
 
 /// Focused tests for the viewport scrolling/clamping logic in
 /// `TUIRenderer.render` for the Recordings `.viewingResults` state.

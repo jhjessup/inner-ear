@@ -1,5 +1,6 @@
 import Foundation
-import InnerEarCore
+import InnerEarRecording
+import InnerEarTranscription
 
 /// Pure, synchronous state machine for the TUI.
 ///

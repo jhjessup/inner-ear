@@ -1,6 +1,7 @@
 import Foundation
 import Testing
-@testable import InnerEarCore
+@testable import InnerEarRecording
+@testable import InnerEarTranscription
 
 /// Satisfies TEST_DOCTRINE.md MTM-2: "No code path in AudioCaptureService,
 /// TranscriptionService, DiarizationService, or SummarizationService issues
