@@ -34,7 +34,11 @@ struct InnerEarCLI: AsyncParsableCommand {
             ExportCommand.self,
             TUICommand.self
         ],
-        defaultSubcommand: nil
+        // `innerear` with no subcommand launches the TUI directly — it's
+        // the primary interface (see README); `record`/`transcribe`/
+        // `export` are lower-level scripting subcommands you still reach
+        // explicitly (`innerear record`, etc.).
+        defaultSubcommand: TUICommand.self
     )
 }
 
