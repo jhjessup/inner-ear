@@ -1,4 +1,5 @@
 import Foundation
+import InnerEarRecording
 // WhisperKit's own types (e.g. the WhisperKit pipeline class itself)
 // aren't yet Sendable-audited, which trips Swift 6 strict concurrency when
 // they cross this actor's isolation boundary — same situation as

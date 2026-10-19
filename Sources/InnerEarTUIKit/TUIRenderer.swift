@@ -1,5 +1,6 @@
 import Foundation
-import InnerEarCore
+import InnerEarRecording
+import InnerEarTranscription
 
 /// Pure rendering logic for the TUI. Given a state and terminal dimensions,
 /// returns an array of lines (one per row) ready to be written to the

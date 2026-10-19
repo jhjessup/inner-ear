@@ -1,6 +1,8 @@
 import ArgumentParser
 import Foundation
 import InnerEarCore
+import InnerEarRecording
+import InnerEarTranscription
 import InnerEarTUIKit
 
 /// `innerear tui` — Interactive terminal dashboard for recording,
@@ -22,7 +24,8 @@ struct TUICommand: AsyncParsableCommand {
         )
         let summarization = ExtractiveSummarizationService()
         let export = FileExportService()
-        let store = try RecordingStore()
+        let recordingStore = try RecordingStore()
+        let transcriptStore = try TranscriptStore()
 
         // Hand off to the run loop
         try await TUIRunLoop.run(
@@ -31,7 +34,8 @@ struct TUICommand: AsyncParsableCommand {
             diarization: diarization,
             summarization: summarization,
             export: export,
-            store: store
+            recordingStore: recordingStore,
+            transcriptStore: transcriptStore
         )
     }
 }

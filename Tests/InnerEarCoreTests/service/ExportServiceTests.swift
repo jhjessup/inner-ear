@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import InnerEarCore
+@testable import InnerEarTranscription
 
 /// Tests for the concrete FileExportService implementation.
 /// Uses real FileExportService instances (not fakes) and exports TestFixtures data

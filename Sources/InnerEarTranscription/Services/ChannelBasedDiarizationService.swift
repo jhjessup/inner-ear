@@ -1,4 +1,5 @@
 import Foundation
+import InnerEarRecording
 
 /// Channel-based `DiarizationService` implementation.
 ///

@@ -1,6 +1,7 @@
 import Foundation
 import Testing
-@testable import InnerEarCore
+@testable import InnerEarRecording
+@testable import InnerEarTranscription
 
 /// Tests for the concrete `ChannelBasedDiarizationService` implementation
 /// (Phase 4 — see `docs/adr/phase-4-diarization-approach.md`).

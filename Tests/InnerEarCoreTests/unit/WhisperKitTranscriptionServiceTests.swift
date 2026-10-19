@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import InnerEarCore
+@testable import InnerEarTranscription
 
 /// Tests for `WhisperKitTranscriptionService.sanitizeSegmentText`, the pure
 /// string-cleanup helper that strips WhisperKit/Whisper `<|...|>`

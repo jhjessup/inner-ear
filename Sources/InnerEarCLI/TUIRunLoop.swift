@@ -1,5 +1,7 @@
 import Foundation
 import InnerEarCore
+import InnerEarRecording
+import InnerEarTranscription
 import InnerEarTUIKit
 
 /// The TUI run loop: bridges the pure `TUIController.reduce` state machine
@@ -15,19 +17,18 @@ enum TUIRunLoop {
         diarization: ChannelBasedDiarizationService,
         summarization: ExtractiveSummarizationService,
         export: FileExportService,
-        store: RecordingStore
+        recordingStore: RecordingStore,
+        transcriptStore: TranscriptStore
     ) async throws {
         let rawMode = try RawTerminalMode()
         defer { rawMode.restore() }
 
-        // `store` is mutable because `.saveDataDirectory` may need to
-        // rebuild it (a fresh `RecordingStore` reads the (possibly new)
-        // config.json from disk on init). Boxed in a class (rather than a
-        // plain `var`) so the SIGINT/SIGTERM cleanup closure below can
-        // capture a stable reference and always see the latest store,
-        // instead of capturing a mutable local var across a concurrency
-        // boundary (which Swift 6 strict concurrency disallows).
-        let storeBox = StoreBox(store)
+        // Boxed (rather than plain `var`s) so the SIGINT/SIGTERM cleanup
+        // closure below can capture a stable reference and always see the
+        // latest stores (after a `.saveDataDirectory` rebuild), instead of
+        // capturing mutable local vars across a concurrency boundary (which
+        // Swift 6 strict concurrency disallows).
+        let storeBox = StoreBox(recordingStore: recordingStore, transcriptStore: transcriptStore)
 
         // Ctrl-C/SIGTERM must never silently discard an in-progress
         // recording. `stopCapture()` throws `.noActiveCapture` (caught by
@@ -38,7 +39,7 @@ enum TUIRunLoop {
             restoreAction: { rawMode.restore() },
             cleanup: {
                 if let recording = try? await audioCapture.stopCapture() {
-                    try? storeBox.store.save(recording)
+                    try? storeBox.recordingStore.save(recording)
                 }
             }
         )
@@ -72,7 +73,10 @@ enum TUIRunLoop {
         // still triggered on every nav Enter into this section, so this is
         // purely about the pane's PREVIEW being accurate from frame one,
         // not a substitute for that refresh.
-        state.recordings = .list(entries: buildRecordingListEntries(store: storeBox.store), selectedIndex: 0)
+        state.recordings = .list(
+            entries: buildRecordingListEntries(recordingStore: storeBox.recordingStore, transcriptStore: storeBox.transcriptStore),
+            selectedIndex: 0
+        )
 
         // Renders `state` immediately, using a freshly-queried terminal size.
         // Effects like `.runPipeline` set `state` multiple times in sequence
@@ -116,12 +120,12 @@ enum TUIRunLoop {
 
                         case .stopRecording:
                             let recording = try await audioCapture.stopCapture()
-                            try storeBox.store.save(recording)
+                            try storeBox.recordingStore.save(recording)
                             state.record = .saved(recording)
                             renderNow()
 
                         case .loadRecordings:
-                            let entries = buildRecordingListEntries(store: storeBox.store)
+                            let entries = buildRecordingListEntries(recordingStore: storeBox.recordingStore, transcriptStore: storeBox.transcriptStore)
                             state.recordings = .list(entries: entries, selectedIndex: 0)
                             renderNow()
 
@@ -171,8 +175,8 @@ enum TUIRunLoop {
                             let summary = try await summarization.summarize(transcript: diarizedTranscript)
 
                             // Persist results
-                            try storeBox.store.save(diarizedTranscript)
-                            try storeBox.store.save(summary)
+                            try storeBox.transcriptStore.save(diarizedTranscript)
+                            try storeBox.transcriptStore.save(summary)
 
                             // Transition to results view
                             state.recordings = .viewingResults(
@@ -230,9 +234,9 @@ enum TUIRunLoop {
                             // next effect in the `for effect in effects`
                             // loop without trying to refresh state from a
                             // half-rewritten store). On success, recreate
-                            // the store (so it picks up the new config),
-                            // refresh the status, and invalidate the cached
-                            // Recordings list.
+                            // BOTH stores (so each picks up the new
+                            // config.json), refresh the status, and
+                            // invalidate the cached Recordings list.
                             do {
                                 try InnerEarConfigResolver.writeRecordingsDirectory(path)
                             } catch {
@@ -242,7 +246,8 @@ enum TUIRunLoop {
                             }
                             // Success path.
                             do {
-                                storeBox.store = try RecordingStore()
+                                storeBox.recordingStore = try RecordingStore()
+                                storeBox.transcriptStore = try TranscriptStore()
                             } catch {
                                 state.modal = .error("\(error)")
                                 renderNow()
@@ -254,7 +259,7 @@ enum TUIRunLoop {
                                 source: mapSource(sourceInfo)
                             )
                             // Reload the Recordings list from the fresh
-                            // store (its contents live under the new data
+                            // stores (their contents live under the new data
                             // directory). If the lookup throws for any
                             // reason, fall back to an empty list rather
                             // than surfacing another error here — the
@@ -263,7 +268,7 @@ enum TUIRunLoop {
                             // `.loadRecordings` so the per-row audio /
                             // transcript / summary / file-URL resolution
                             // is identical to a fresh nav-Enter.
-                            let entries = buildRecordingListEntries(store: storeBox.store)
+                            let entries = buildRecordingListEntries(recordingStore: storeBox.recordingStore, transcriptStore: storeBox.transcriptStore)
                             state.recordings = .list(entries: entries, selectedIndex: 0)
                             renderNow()
 
@@ -275,16 +280,16 @@ enum TUIRunLoop {
                             // by the controller) and will just reflect
                             // whatever the real on-disk state ends up
                             // being.
-                            try? storeBox.store.deleteAudioFiles(for: recording)
-                            cleanupOrphanedCatalogEntryIfNeeded(recording.id, store: storeBox.store)
+                            try? storeBox.recordingStore.deleteAudioFiles(for: recording)
+                            cleanupOrphanedCatalogEntryIfNeeded(recording.id, recordingStore: storeBox.recordingStore, transcriptStore: storeBox.transcriptStore)
 
                         case .deleteTranscript(let transcript):
                             // Same `try?` rationale as `.deleteAudio` — a
                             // missing-on-disk transcript is not an error
                             // case for the user, just a no-op that the
                             // follow-up `.loadRecordings` will reflect.
-                            try? storeBox.store.deleteTranscript(transcript)
-                            cleanupOrphanedCatalogEntryIfNeeded(transcript.recordingID, store: storeBox.store)
+                            try? storeBox.transcriptStore.deleteTranscript(transcript)
+                            cleanupOrphanedCatalogEntryIfNeeded(transcript.recordingID, recordingStore: storeBox.recordingStore, transcriptStore: storeBox.transcriptStore)
 
                         case .quit:
                             rawMode.restore()
@@ -351,25 +356,25 @@ enum TUIRunLoop {
     /// Build the full `[RecordingListEntry]` array for the Recordings list
     /// by resolving each recording's audio presence, transcript (by
     /// `recordingID`), summary (by `transcriptID`), and the on-disk
-    /// transcript JSON URL — all in one pass over the store's contents.
+    /// transcript JSON URL — all in one pass over both stores' contents.
     /// Used by both `.loadRecordings` (initial nav-Enter into the
     /// Recordings section) and the `.saveDataDirectory` success path
-    /// (which rebuilds the store with a new data directory and needs the
+    /// (which rebuilds the stores with a new data directory and needs the
     /// list re-resolved against the fresh contents).
     ///
     /// Failures are swallowed at the per-field level (e.g. a missing
     /// transcripts directory yields `[]`, not a thrown error) so a
     /// partially-populated store still renders something useful rather
     /// than a hard error in the UI.
-    private static func buildRecordingListEntries(store: RecordingStore) -> [RecordingListEntry] {
-        let recordings = (try? store.listRecordings()) ?? []
-        let allTranscripts = (try? store.listTranscripts()) ?? []
-        let allSummaries = (try? store.listSummaries()) ?? []
+    private static func buildRecordingListEntries(recordingStore: RecordingStore, transcriptStore: TranscriptStore) -> [RecordingListEntry] {
+        let recordings = (try? recordingStore.listRecordings()) ?? []
+        let allTranscripts = (try? transcriptStore.listTranscripts()) ?? []
+        let allSummaries = (try? transcriptStore.listSummaries()) ?? []
         return recordings.map { recording in
             let hasAudio = FileManager.default.fileExists(atPath: recording.microphoneFileURL.path)
             let transcript = allTranscripts.first { $0.recordingID == recording.id }
             let summary = transcript.flatMap { t in allSummaries.first { $0.transcriptID == t.id } }
-            let transcriptURL = transcript.map { store.transcriptFileURL(for: $0) }
+            let transcriptURL = transcript.map { transcriptStore.transcriptFileURL(for: $0) }
             return RecordingListEntry(
                 recording: recording,
                 hasAudio: hasAudio,
@@ -384,12 +389,12 @@ enum TUIRunLoop {
     /// Recording catalog entry entirely if BOTH are now gone — otherwise a
     /// fully-empty ghost entry (no audio, no transcript) would linger in
     /// the list forever with nothing useful to show or do with it.
-    private static func cleanupOrphanedCatalogEntryIfNeeded(_ recordingID: UUID, store: RecordingStore) {
-        guard let recording = try? store.loadRecording(id: recordingID) else { return }
+    private static func cleanupOrphanedCatalogEntryIfNeeded(_ recordingID: UUID, recordingStore: RecordingStore, transcriptStore: TranscriptStore) {
+        guard let recording = try? recordingStore.loadRecording(id: recordingID) else { return }
         let hasAudio = FileManager.default.fileExists(atPath: recording.microphoneFileURL.path)
-        let hasTranscript = (try? store.listTranscripts())?.contains { $0.recordingID == recordingID } ?? false
+        let hasTranscript = (try? transcriptStore.listTranscripts())?.contains { $0.recordingID == recordingID } ?? false
         if !hasAudio && !hasTranscript {
-            try? store.deleteRecordingCatalogEntry(recordingID)
+            try? recordingStore.deleteRecordingCatalogEntry(recordingID)
         }
     }
 }
@@ -421,33 +426,49 @@ private final class ProgressRenderThrottle: @unchecked Sendable {
     }
 }
 
-/// Mutable-reference holder for `RecordingStore`, so the SIGINT/SIGTERM
-/// cleanup closure in `run(...)` can capture a stable reference and always
-/// observe the latest store (after a `.saveDataDirectory` reassignment)
-/// instead of capturing a `var` local across a concurrency boundary, which
-/// Swift 6 strict concurrency disallows. A signal can fire at any moment,
-/// including concurrently with the main run loop reassigning `store` mid-
-/// `.saveDataDirectory` — so this is genuinely accessed from two contexts
-/// at once, not just formally, and needs real synchronization rather than
-/// an `@unchecked Sendable` free pass on a plain `var`.
+/// Mutable-reference holder for `RecordingStore`/`TranscriptStore`, so the
+/// SIGINT/SIGTERM cleanup closure in `run(...)` can capture a stable
+/// reference and always observe the latest stores (after a
+/// `.saveDataDirectory` reassignment) instead of capturing `var` locals
+/// across a concurrency boundary, which Swift 6 strict concurrency
+/// disallows. A signal can fire at any moment, including concurrently with
+/// the main run loop reassigning a store mid-`.saveDataDirectory` — so this
+/// is genuinely accessed from two contexts at once, not just formally, and
+/// needs real synchronization rather than an `@unchecked Sendable` free
+/// pass on plain `var`s.
 private final class StoreBox: @unchecked Sendable {
     private let lock = NSLock()
-    private var _store: RecordingStore
+    private var _recordingStore: RecordingStore
+    private var _transcriptStore: TranscriptStore
 
-    init(_ store: RecordingStore) {
-        self._store = store
+    init(recordingStore: RecordingStore, transcriptStore: TranscriptStore) {
+        self._recordingStore = recordingStore
+        self._transcriptStore = transcriptStore
     }
 
-    var store: RecordingStore {
+    var recordingStore: RecordingStore {
         get {
             lock.lock()
             defer { lock.unlock() }
-            return _store
+            return _recordingStore
         }
         set {
             lock.lock()
             defer { lock.unlock() }
-            _store = newValue
+            _recordingStore = newValue
+        }
+    }
+
+    var transcriptStore: TranscriptStore {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _transcriptStore
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _transcriptStore = newValue
         }
     }
 }

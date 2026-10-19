@@ -1,4 +1,5 @@
 import Foundation
+import InnerEarRecording
 
 public enum DiarizationError: Error, Equatable, Sendable {
     case tooManySpeakers(detected: Int, maxSupported: Int)
