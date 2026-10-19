@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import InnerEarTUIKit
+import InnerEarCore
 import InnerEarRecording
 import InnerEarTranscription
 
@@ -731,7 +732,7 @@ struct TUIRendererTests {
         let state = TUIState(
             focusedPane: .detail,
             selectedSection: 2,
-            settings: .viewing(resolvedPath: "/data/inner", source: .configFile)
+            settings: .viewing(resolvedPath: "/data/inner", source: .configFile, transcriptionMode: .manual)
         )
         let lines = TUIRenderer.render(state: state, width: 80, height: 24)
         let joined = lines.joined(separator: "\n")
@@ -745,11 +746,45 @@ struct TUIRendererTests {
         let state = TUIState(
             focusedPane: .detail,
             selectedSection: 2,
-            settings: .viewing(resolvedPath: "/from/env", source: .envVar)
+            settings: .viewing(resolvedPath: "/from/env", source: .envVar, transcriptionMode: .manual)
         )
         let lines = TUIRenderer.render(state: state, width: 80, height: 24)
         let joined = lines.joined(separator: "\n")
         #expect(joined.contains("INNEREAR_DATA_DIR"))
+    }
+
+    @Test
+    func settings_viewing_automaticMode_rendersAutomaticDescription() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .viewing(resolvedPath: "/data/inner", source: .configFile, transcriptionMode: .automatic)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("automatic"))
+        #expect(joined.contains("runs after recording"))
+        #expect(joined.contains("[m] Cycle transcription mode"))
+    }
+
+    @Test
+    func settings_viewing_automaticMode_atMinimumWidth_stillRendersWholeWords() {
+        // Regression guard: `pad()` hard-truncates at the detail pane's
+        // width with no wrapping/ellipsis, so content here must fit even
+        // at `TUIRenderer.minWidth` (60) — not just the comfortable 80
+        // used by most tests. This caught a real bug: an earlier, longer
+        // combined description line truncated "background" to "backgrou"
+        // at width 80, and would have been worse at the narrower minimum.
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .viewing(resolvedPath: "/data/inner", source: .configFile, transcriptionMode: .automatic)
+        )
+        let lines = TUIRenderer.render(state: state, width: TUIRenderer.minWidth, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("automatic"))
+        #expect(joined.contains("runs after recording"))
+        #expect(joined.contains("[m] Cycle transcription mode"))
     }
 
     @Test

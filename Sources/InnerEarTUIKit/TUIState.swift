@@ -1,4 +1,5 @@
 import Foundation
+import InnerEarCore
 import InnerEarRecording
 import InnerEarTranscription
 
@@ -15,7 +16,7 @@ public struct TUIState: Equatable, Sendable {
         selectedSection: Int = 0,
         record: RecordSectionState = .idle,
         recordings: RecordingsSectionState = .list(entries: [], selectedIndex: 0),
-        settings: SettingsSectionState = .viewing(resolvedPath: "", source: .defaultLocation),
+        settings: SettingsSectionState = .viewing(resolvedPath: "", source: .defaultLocation, transcriptionMode: .manual),
         modal: Modal? = nil
     ) {
         self.focusedPane = focusedPane
@@ -49,7 +50,7 @@ public enum RecordingsSectionState: Equatable, Sendable {
 }
 
 public enum SettingsSectionState: Equatable, Sendable {
-    case viewing(resolvedPath: String, source: DataDirectorySource)
+    case viewing(resolvedPath: String, source: DataDirectorySource, transcriptionMode: TranscriptionMode)
     case editing(currentInput: String)
 }
 

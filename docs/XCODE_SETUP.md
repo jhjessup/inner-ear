@@ -29,7 +29,10 @@ The targets:
 - **`InnerEarTranscription`** — `WhisperKit` transcription, `SpeakerKit`
   diarization, extractive summarization, and multi-format export, same
   protocol-per-capability-plus-fake shape.
-- **`InnerEarCore`** — just the shared kernel both of the above build on:
+- **`InnerEarMetadata`** — Calendar (`EventKit`) and foreground-window
+  (`CGWindowListCopyWindowInfo`) context capture, linked to a recording by
+  id only.
+- **`InnerEarCore`** — just the shared kernel the above build on:
   data-directory config resolution and the generic JSON-disk persistence
   helper. No domain models/services live here.
 - **`InnerEarTUIKit`** — the pure TUI state machine and renderer

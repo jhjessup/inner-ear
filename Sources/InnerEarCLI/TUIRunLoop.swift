@@ -1,5 +1,6 @@
 import Foundation
 import InnerEarCore
+import InnerEarMetadata
 import InnerEarRecording
 import InnerEarTranscription
 import InnerEarTUIKit
@@ -17,9 +18,17 @@ enum TUIRunLoop {
         diarization: ChannelBasedDiarizationService,
         summarization: ExtractiveSummarizationService,
         export: FileExportService,
+        backgroundTranscription: BackgroundTranscriptionCoordinator,
+        calendarMetadata: CalendarMetadataService,
+        windowMetadata: WindowMetadataService,
         recordingStore: RecordingStore,
-        transcriptStore: TranscriptStore
+        transcriptStore: TranscriptStore,
+        metadataStore: MetadataStore
     ) async throws {
+        // Resolved once at startup; updated in place whenever
+        // `.saveTranscriptionMode` runs so this reflects what's actually
+        // on disk without re-reading config.json on every loop tick.
+        var transcriptionMode = InnerEarConfigResolver.resolveTranscriptionMode()
         let rawMode = try RawTerminalMode()
         defer { rawMode.restore() }
 
@@ -28,7 +37,7 @@ enum TUIRunLoop {
         // latest stores (after a `.saveDataDirectory` rebuild), instead of
         // capturing mutable local vars across a concurrency boundary (which
         // Swift 6 strict concurrency disallows).
-        let storeBox = StoreBox(recordingStore: recordingStore, transcriptStore: transcriptStore)
+        let storeBox = StoreBox(recordingStore: recordingStore, transcriptStore: transcriptStore, metadataStore: metadataStore)
 
         // Ctrl-C/SIGTERM must never silently discard an in-progress
         // recording. `stopCapture()` throws `.noActiveCapture` (caught by
@@ -122,6 +131,19 @@ enum TUIRunLoop {
                             let recording = try await audioCapture.stopCapture()
                             try storeBox.recordingStore.save(recording)
                             state.record = .saved(recording)
+                            if transcriptionMode == .automatic {
+                                await backgroundTranscription.enqueue(recording)
+                            }
+                            // Best-effort: a Calendar/window-lookup failure
+                            // (e.g. permission not yet granted) must never
+                            // block the recording from being saved — this
+                            // just enriches it with context if available.
+                            await captureAndSaveMetadata(
+                                for: recording,
+                                metadataStore: storeBox.metadataStore,
+                                calendarMetadata: calendarMetadata,
+                                windowMetadata: windowMetadata
+                            )
                             renderNow()
 
                         case .loadRecordings:
@@ -223,7 +245,8 @@ enum TUIRunLoop {
                             let (url, sourceInfo) = InnerEarConfigResolver.resolveDataDirectoryWithSource()
                             state.settings = .viewing(
                                 resolvedPath: url.path,
-                                source: mapSource(sourceInfo)
+                                source: mapSource(sourceInfo),
+                                transcriptionMode: transcriptionMode
                             )
                             renderNow()
 
@@ -248,6 +271,7 @@ enum TUIRunLoop {
                             do {
                                 storeBox.recordingStore = try RecordingStore()
                                 storeBox.transcriptStore = try TranscriptStore()
+                                storeBox.metadataStore = try MetadataStore()
                             } catch {
                                 state.modal = .error("\(error)")
                                 renderNow()
@@ -256,7 +280,8 @@ enum TUIRunLoop {
                             let (url, sourceInfo) = InnerEarConfigResolver.resolveDataDirectoryWithSource()
                             state.settings = .viewing(
                                 resolvedPath: url.path,
-                                source: mapSource(sourceInfo)
+                                source: mapSource(sourceInfo),
+                                transcriptionMode: transcriptionMode
                             )
                             // Reload the Recordings list from the fresh
                             // stores (their contents live under the new data
@@ -270,6 +295,23 @@ enum TUIRunLoop {
                             // is identical to a fresh nav-Enter.
                             let entries = buildRecordingListEntries(recordingStore: storeBox.recordingStore, transcriptStore: storeBox.transcriptStore)
                             state.recordings = .list(entries: entries, selectedIndex: 0)
+                            renderNow()
+
+                        case .saveTranscriptionMode(let mode):
+                            do {
+                                try InnerEarConfigResolver.writeTranscriptionMode(mode)
+                            } catch {
+                                state.modal = .error("\(error)")
+                                renderNow()
+                                continue
+                            }
+                            transcriptionMode = mode
+                            let (url, sourceInfo) = InnerEarConfigResolver.resolveDataDirectoryWithSource()
+                            state.settings = .viewing(
+                                resolvedPath: url.path,
+                                source: mapSource(sourceInfo),
+                                transcriptionMode: transcriptionMode
+                            )
                             renderNow()
 
                         case .deleteAudio(let recording):
@@ -300,6 +342,36 @@ enum TUIRunLoop {
                         renderNow()
                     }
                 }
+            }
+
+            // 1.5. Drain any background transcription pipelines
+            // (`TranscriptionMode.automatic`) that finished since the last
+            // tick. Polled every iteration — same ~150ms cadence as the
+            // idle render below — rather than pushed, mirroring
+            // `AVFoundationAudioCaptureService.consumeAutoStoppedRecording()`'s
+            // poll-to-drain pattern for the same reason: the run loop
+            // already polls once per tick, so a push/callback mechanism
+            // would just need its own thread-safety story for no benefit.
+            let completedPipelines = await backgroundTranscription.drainCompleted()
+            if !completedPipelines.isEmpty {
+                for result in completedPipelines {
+                    try? storeBox.transcriptStore.save(result.transcript)
+                    try? storeBox.transcriptStore.save(result.summary)
+                }
+                // If the Recordings list is currently on screen, refresh it
+                // so the newly-transcribed row's `[T]` marker shows up
+                // without the user having to leave and re-enter the
+                // section.
+                if case .list = state.recordings {
+                    let entries = buildRecordingListEntries(recordingStore: storeBox.recordingStore, transcriptStore: storeBox.transcriptStore)
+                    state.recordings = .list(entries: entries, selectedIndex: 0)
+                }
+                renderNow()
+            }
+            let failedPipelines = await backgroundTranscription.drainFailed()
+            if let firstFailure = failedPipelines.first {
+                state.modal = .error("Background transcription failed for \"\(firstFailure.recording.title)\": \(firstFailure.errorDescription)")
+                renderNow()
             }
 
             // 2. Render (covers idle-state updates with no keypress, e.g. the
@@ -397,6 +469,32 @@ enum TUIRunLoop {
             try? recordingStore.deleteRecordingCatalogEntry(recordingID)
         }
     }
+
+    /// Looks up calendar/window context for `recording`'s time range and
+    /// persists it if either is found. Entirely best-effort: a missing
+    /// Calendar/Screen-Recording permission grant, or simply nothing
+    /// overlapping, is not an error — this enriches a recording, it never
+    /// gates saving one.
+    private static func captureAndSaveMetadata(
+        for recording: Recording,
+        metadataStore: MetadataStore,
+        calendarMetadata: CalendarMetadataService,
+        windowMetadata: WindowMetadataService
+    ) async {
+        let interval = DateInterval(start: recording.createdAt, duration: recording.duration)
+        let calendarContext: CalendarContext? = (try? await calendarMetadata.activeEvent(during: interval)) ?? nil
+        let windowContext = await windowMetadata.captureForegroundWindow()
+
+        guard calendarContext != nil || windowContext != nil else { return }
+
+        let metadata = RecordingMetadata(
+            recordingID: recording.id,
+            calendarContext: calendarContext,
+            windowContext: windowContext,
+            capturedAt: Date()
+        )
+        try? metadataStore.save(metadata)
+    }
 }
 
 /// Rate-limits how often the live transcription-progress callback is
@@ -426,9 +524,9 @@ private final class ProgressRenderThrottle: @unchecked Sendable {
     }
 }
 
-/// Mutable-reference holder for `RecordingStore`/`TranscriptStore`, so the
-/// SIGINT/SIGTERM cleanup closure in `run(...)` can capture a stable
-/// reference and always observe the latest stores (after a
+/// Mutable-reference holder for `RecordingStore`/`TranscriptStore`/
+/// `MetadataStore`, so the SIGINT/SIGTERM cleanup closure in `run(...)` can
+/// capture a stable reference and always observe the latest stores (after a
 /// `.saveDataDirectory` reassignment) instead of capturing `var` locals
 /// across a concurrency boundary, which Swift 6 strict concurrency
 /// disallows. A signal can fire at any moment, including concurrently with
@@ -440,10 +538,12 @@ private final class StoreBox: @unchecked Sendable {
     private let lock = NSLock()
     private var _recordingStore: RecordingStore
     private var _transcriptStore: TranscriptStore
+    private var _metadataStore: MetadataStore
 
-    init(recordingStore: RecordingStore, transcriptStore: TranscriptStore) {
+    init(recordingStore: RecordingStore, transcriptStore: TranscriptStore, metadataStore: MetadataStore) {
         self._recordingStore = recordingStore
         self._transcriptStore = transcriptStore
+        self._metadataStore = metadataStore
     }
 
     var recordingStore: RecordingStore {
@@ -469,6 +569,19 @@ private final class StoreBox: @unchecked Sendable {
             lock.lock()
             defer { lock.unlock() }
             _transcriptStore = newValue
+        }
+    }
+
+    var metadataStore: MetadataStore {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _metadataStore
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _metadataStore = newValue
         }
     }
 }

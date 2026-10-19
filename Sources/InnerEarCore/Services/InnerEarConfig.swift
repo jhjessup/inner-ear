@@ -1,14 +1,32 @@
 import Foundation
 
-/// User-tunable configuration for the InnerEar data directory.
+/// Which on-device transcription model to use. Mirrors the tradeoff Thoth
+/// exposes: Whisper Large V3 Turbo (accuracy) vs. Parakeet (speed).
 ///
-/// The `recordingsDirectory` field lets a user point InnerEar's storage
-/// somewhere other than the default `~/Library/Application Support/InnerEar/`
-/// — useful for syncing recordings to iCloud/Dropbox, working on a project
-/// from a custom mount, or running multiple test instances side-by-side.
-///
-/// Today this struct only carries `recordingsDirectory`; future
-/// configuration knobs (e.g. a transcription model preference) belong here too.
+/// How transcription gets triggered after a recording finishes:
+public enum TranscriptionMode: String, Codable, Sendable, CaseIterable {
+    /// Never transcribe automatically. The user explicitly picks "Generate
+    /// Transcript" from the Recordings list whenever they want one — the
+    /// one pre-existing path this app has always had.
+    case disabled
+    /// Same runtime behavior as `.disabled` — nothing transcribes without
+    /// an explicit user action. Kept as a distinct, user-facing case
+    /// (rather than collapsing into `.disabled`) because the two read
+    /// differently in Settings: "disabled" implies transcription is off;
+    /// "manual" implies it's available on request. Both map to the same
+    /// code path.
+    case manual
+    /// After a recording finishes (manual stop or auto-stop-after-silence),
+    /// automatically kick off transcribe → diarize → summarize in the
+    /// background, without blocking the TUI — see
+    /// `BackgroundTranscriptionCoordinator`.
+    case automatic
+}
+
+/// User-tunable configuration, persisted to `config.json` at the default
+/// data directory (see `InnerEarConfigResolver`'s doc comment on *why* the
+/// config file itself always lives there regardless of what
+/// `recordingsDirectory` points elsewhere to).
 public struct InnerEarConfig: Codable, Sendable {
     /// Absolute (or `~`-prefixed) filesystem path under which InnerEar
     /// should write its `recordings/`, `transcripts/`, and `summaries/`
@@ -16,8 +34,14 @@ public struct InnerEarConfig: Codable, Sendable {
     /// Support location".
     public var recordingsDirectory: String?
 
-    public init(recordingsDirectory: String? = nil) {
+    /// `nil` means "use the default" (`.manual` — preserves this app's
+    /// original always-manual behavior for anyone with an existing
+    /// `config.json` predating this field).
+    public var transcriptionMode: TranscriptionMode?
+
+    public init(recordingsDirectory: String? = nil, transcriptionMode: TranscriptionMode? = nil) {
         self.recordingsDirectory = recordingsDirectory
+        self.transcriptionMode = transcriptionMode
     }
 }
 
@@ -110,9 +134,33 @@ public enum InnerEarConfigResolver {
         return (defaultBase, .defaultLocation)
     }
 
+    /// The fixed location `config.json` always lives at, regardless of
+    /// what `recordingsDirectory` it points elsewhere to (see this type's
+    /// doc comment).
+    private static func configFileURL(fileManager: FileManager) -> URL {
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport.appendingPathComponent("InnerEar", isDirectory: true)
+            .appendingPathComponent("config.json", isDirectory: false)
+    }
+
+    /// Reads the current `config.json` if present and decodable, else an
+    /// empty (all-`nil`) config — used as the read half of a read-modify-
+    /// write by both `write*` functions below, so setting one field never
+    /// silently clobbers another that was already saved.
+    private static func readCurrentConfig(fileManager: FileManager) -> InnerEarConfig {
+        let configURL = configFileURL(fileManager: fileManager)
+        guard fileManager.fileExists(atPath: configURL.path),
+              let data = try? Data(contentsOf: configURL),
+              let config = try? JSONDecoder().decode(InnerEarConfig.self, from: data) else {
+            return InnerEarConfig()
+        }
+        return config
+    }
+
     /// Write `recordingsDirectory` to the fixed default config.json location
-    /// (creating the default InnerEar/ directory first if needed). Passing
-    /// `nil` or an empty string clears the override (falls back to default).
+    /// (creating the default InnerEar/ directory first if needed), preserving
+    /// any other already-saved fields. Passing `nil` or an empty string
+    /// clears the override (falls back to default).
     public static func writeRecordingsDirectory(
         _ path: String?,
         fileManager: FileManager = .default
@@ -120,11 +168,35 @@ public enum InnerEarConfigResolver {
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let defaultBase = appSupport.appendingPathComponent("InnerEar", isDirectory: true)
         try fileManager.createDirectory(at: defaultBase, withIntermediateDirectories: true)
-        let configURL = defaultBase.appendingPathComponent("config.json", isDirectory: false)
-        let normalized = (path?.isEmpty ?? true) ? nil : path
-        let config = InnerEarConfig(recordingsDirectory: normalized)
+        var config = readCurrentConfig(fileManager: fileManager)
+        config.recordingsDirectory = (path?.isEmpty ?? true) ? nil : path
         let data = try JSONEncoder().encode(config)
-        try data.write(to: configURL, options: .atomic)
+        try data.write(to: configFileURL(fileManager: fileManager), options: .atomic)
+    }
+
+    /// `nil` means "use the default" — see `TranscriptionMode`/
+    /// `InnerEarConfig.transcriptionMode`'s doc comments for what that
+    /// default actually is.
+    public static func resolveTranscriptionMode(
+        fileManager: FileManager = .default
+    ) -> TranscriptionMode {
+        readCurrentConfig(fileManager: fileManager).transcriptionMode ?? .manual
+    }
+
+    /// Write `transcriptionMode` to the fixed default config.json location,
+    /// preserving any other already-saved fields (see
+    /// `writeRecordingsDirectory`'s equivalent note).
+    public static func writeTranscriptionMode(
+        _ mode: TranscriptionMode,
+        fileManager: FileManager = .default
+    ) throws {
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let defaultBase = appSupport.appendingPathComponent("InnerEar", isDirectory: true)
+        try fileManager.createDirectory(at: defaultBase, withIntermediateDirectories: true)
+        var config = readCurrentConfig(fileManager: fileManager)
+        config.transcriptionMode = mode
+        let data = try JSONEncoder().encode(config)
+        try data.write(to: configFileURL(fileManager: fileManager), options: .atomic)
     }
 
     /// Plain enum mirroring `DataDirectorySource` from InnerEarTUIKit, kept

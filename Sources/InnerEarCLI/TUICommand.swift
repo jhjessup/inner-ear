@@ -1,6 +1,7 @@
 import ArgumentParser
 import Foundation
 import InnerEarCore
+import InnerEarMetadata
 import InnerEarRecording
 import InnerEarTranscription
 import InnerEarTUIKit
@@ -24,8 +25,20 @@ struct TUICommand: AsyncParsableCommand {
         )
         let summarization = ExtractiveSummarizationService()
         let export = FileExportService()
+        // Shares the same transcription/diarization/summarization service
+        // instances as the manual pipeline above — not separate ones —
+        // so a model WhisperKit already loaded for a manual transcribe
+        // isn't redundantly reloaded for an automatic one, or vice versa.
+        let backgroundTranscription = BackgroundTranscriptionCoordinator(
+            transcriptionService: transcription,
+            diarizationService: diarization,
+            summarizationService: summarization
+        )
+        let calendarMetadata = EventKitCalendarMetadataService()
+        let windowMetadata = CGWindowListWindowMetadataService()
         let recordingStore = try RecordingStore()
         let transcriptStore = try TranscriptStore()
+        let metadataStore = try MetadataStore()
 
         // Hand off to the run loop
         try await TUIRunLoop.run(
@@ -34,8 +47,12 @@ struct TUICommand: AsyncParsableCommand {
             diarization: diarization,
             summarization: summarization,
             export: export,
+            backgroundTranscription: backgroundTranscription,
+            calendarMetadata: calendarMetadata,
+            windowMetadata: windowMetadata,
             recordingStore: recordingStore,
-            transcriptStore: transcriptStore
+            transcriptStore: transcriptStore,
+            metadataStore: metadataStore
         )
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import InnerEarCore
 import InnerEarRecording
 import InnerEarTranscription
 
@@ -512,14 +513,23 @@ public enum TUIRenderer {
     /// Section 2 (Settings) detail lines.
     private static func renderSettingsDetail(state: TUIState, width: Int) -> [String] {
         switch state.settings {
-        case .viewing(let resolvedPath, let source):
+        case .viewing(let resolvedPath, let source, let transcriptionMode):
+            // Lines kept short and split rather than combined — `pad()`
+            // hard-truncates at `width` with no wrapping/ellipsis, and the
+            // detail pane can be as narrow as 35 chars (minWidth == 60),
+            // so a single long combined line risks silently cutting a word
+            // in half rather than just looking a bit sparse.
             return [
                 "Data directory:",
                 "  \(resolvedPath)",
                 "",
                 "Source: \(sourceDescription(source))",
                 "",
-                "[e] Edit"
+                "Transcription: \(transcriptionModeLabel(transcriptionMode))",
+                "  \(transcriptionModeDetail(transcriptionMode))",
+                "",
+                "[e] Edit directory",
+                "[m] Cycle transcription mode"
             ]
         case .editing(let currentInput):
             return [
@@ -536,6 +546,26 @@ public enum TUIRenderer {
         case .envVar:        return "INNEREAR_DATA_DIR environment variable"
         case .configFile:    return "config.json"
         case .defaultLocation: return "default (Application Support)"
+        }
+    }
+
+    /// Short label for a `TranscriptionMode` — kept to a single word so it
+    /// never risks truncation even at the narrowest supported detail pane.
+    private static func transcriptionModeLabel(_ mode: TranscriptionMode) -> String {
+        switch mode {
+        case .disabled:  return "disabled"
+        case .manual:    return "manual"
+        case .automatic: return "automatic"
+        }
+    }
+
+    /// One-line elaboration of what `transcriptionModeLabel` means,
+    /// rendered on its own row — see `renderSettingsDetail`'s comment on
+    /// why this is split out rather than combined into one longer line.
+    private static func transcriptionModeDetail(_ mode: TranscriptionMode) -> String {
+        switch mode {
+        case .disabled, .manual: return "generate manually"
+        case .automatic:         return "runs after recording"
         }
     }
 
@@ -586,7 +616,7 @@ public enum TUIRenderer {
         case 2:
             switch state.settings {
             case .viewing:
-                return "[e] Edit  [Tab] Nav  [Esc] Back"
+                return "[e] Edit  [m] Transcription  [Tab] Nav  [Esc] Back"
             case .editing:
                 return "[Enter] Save  [Esc] Cancel  [Backspace] Delete"
             }

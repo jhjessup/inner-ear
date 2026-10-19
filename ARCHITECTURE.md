@@ -24,19 +24,26 @@ breakage that preceded this split.
 
 | Target | Owns | Depends on |
 |---|---|---|
-| `InnerEarCore` | `InnerEarConfig`/`InnerEarConfigResolver` (data-directory resolution), `JSONDiskStore` (shared JSON-file-per-UUID persistence helper) | nothing in-package |
+| `InnerEarCore` | `InnerEarConfig`/`InnerEarConfigResolver` (data-directory + `TranscriptionMode` resolution), `JSONDiskStore` (shared JSON-file-per-UUID persistence helper) | nothing in-package |
 | `InnerEarRecording` | `Recording` model, `AudioCaptureService`/`AVFoundationAudioCaptureService`, `RecordingStore` | `InnerEarCore` only |
-| `InnerEarTranscription` | `Transcript`/`TranscriptSegment`/`Speaker`/`Summary` models, `TranscriptionService`, `DiarizationService`, `SummarizationService`, `ExportService`, `TranscriptStore` | `InnerEarCore`, `InnerEarRecording` (needs the `Recording` type to transcribe it), WhisperKit + SpeakerKit |
-| `InnerEarTUIKit` | the presentation layer (see below) | `InnerEarRecording`, `InnerEarTranscription` |
+| `InnerEarTranscription` | `Transcript`/`TranscriptSegment`/`Speaker`/`Summary` models, `TranscriptionService`, `DiarizationService`, `SummarizationService`, `ExportService`, `TranscriptStore`, `BackgroundTranscriptionCoordinator` (non-blocking pipeline for `TranscriptionMode.automatic`) | `InnerEarCore`, `InnerEarRecording` (needs the `Recording` type to transcribe it), WhisperKit + SpeakerKit |
+| `InnerEarMetadata` | `CalendarContext`/`WindowContext`/`RecordingMetadata` models, `CalendarMetadataService`/`EventKitCalendarMetadataService`, `WindowMetadataService`/`CGWindowListWindowMetadataService`, `MetadataStore` | `InnerEarCore`, `InnerEarRecording` (needs the `Recording` type's `id`/timing only, never the type itself) |
+| `InnerEarTUIKit` | the presentation layer (see below) | `InnerEarCore`, `InnerEarRecording`, `InnerEarTranscription` |
 | `InnerEarCLI` | the management engine (`TUIRunLoop`) + CLI subcommands | all of the above |
 
 The dependency arrows only ever point one way:
-`InnerEarCore ← InnerEarRecording ← InnerEarTranscription`, with
-`InnerEarTUIKit`/`InnerEarCLI` depending on everything. Nothing in
+`InnerEarCore ← InnerEarRecording ← {InnerEarTranscription, InnerEarMetadata}`,
+with `InnerEarTUIKit`/`InnerEarCLI` depending on everything.
+`InnerEarTranscription` and `InnerEarMetadata` never depend on each other —
+each depends only on `InnerEarRecording` (and `InnerEarCore`) for the
+`Recording` type they both need, which is also why
+`RecordingMetadata`/`Transcript` link back to a recording via
+`recordingID: UUID` rather than embedding a `Recording`. Nothing in
 `InnerEarCore` or `InnerEarRecording` ever imports `InnerEarTranscription`
-— if you find yourself needing to, the type you're adding probably belongs
-in `InnerEarTranscription` instead, or the dependency should be inverted
-(the lower target defines a protocol, the higher target implements it).
+or `InnerEarMetadata` — if you find yourself needing to, the type you're
+adding probably belongs in one of those higher targets instead, or the
+dependency should be inverted (the lower target defines a protocol, the
+higher target implements it).
 
 `Recording`/`Transcript`/`Summary` persistence is correspondingly split
 into two stores (`RecordingStore` in `InnerEarRecording`, `TranscriptStore`
@@ -73,6 +80,8 @@ model," and here that's a feature, not a smell:
 | `DiarizationService` | `diarize` | `ChannelBasedDiarizationService` | `InnerEarTranscription` |
 | `SummarizationService` | `summarize` / `chat` | `ExtractiveSummarizationService` | `InnerEarTranscription` |
 | `ExportService` | `export` | `FileExportService` | `InnerEarTranscription` |
+| `CalendarMetadataService` | `activeEvent` | `EventKitCalendarMetadataService` | `InnerEarMetadata` |
+| `WindowMetadataService` | `captureForegroundWindow` | `CGWindowListWindowMetadataService` | `InnerEarMetadata` |
 
 Every method reads as literal SVO grammar:
 `transcriptionService.transcribe(recording) -> Transcript`. That shape —
