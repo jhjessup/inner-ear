@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import InnerEarTUIKit
+import InnerEarCore
 import InnerEarRecording
 import InnerEarTranscription
 
@@ -731,7 +732,7 @@ struct TUIRendererTests {
         let state = TUIState(
             focusedPane: .detail,
             selectedSection: 2,
-            settings: .viewing(resolvedPath: "/data/inner", source: .configFile)
+            settings: .viewing(resolvedPath: "/data/inner", source: .configFile, transcriptionMode: .manual)
         )
         let lines = TUIRenderer.render(state: state, width: 80, height: 24)
         let joined = lines.joined(separator: "\n")
@@ -745,11 +746,25 @@ struct TUIRendererTests {
         let state = TUIState(
             focusedPane: .detail,
             selectedSection: 2,
-            settings: .viewing(resolvedPath: "/from/env", source: .envVar)
+            settings: .viewing(resolvedPath: "/from/env", source: .envVar, transcriptionMode: .manual)
         )
         let lines = TUIRenderer.render(state: state, width: 80, height: 24)
         let joined = lines.joined(separator: "\n")
         #expect(joined.contains("INNEREAR_DATA_DIR"))
+    }
+
+    @Test
+    func settings_viewing_automaticMode_rendersAutomaticDescription() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .viewing(resolvedPath: "/data/inner", source: .configFile, transcriptionMode: .automatic)
+        )
+        let lines = TUIRenderer.render(state: state, width: 80, height: 24)
+        let joined = lines.joined(separator: "\n")
+        #expect(joined.contains("automatic"))
+        #expect(joined.contains("background"))
+        #expect(joined.contains("[m] Cycle transcription mode"))
     }
 
     @Test

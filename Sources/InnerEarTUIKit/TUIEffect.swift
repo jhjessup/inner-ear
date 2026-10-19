@@ -1,4 +1,5 @@
 import Foundation
+import InnerEarCore
 import InnerEarRecording
 import InnerEarTranscription
 
@@ -10,6 +11,7 @@ public enum TUIEffect: Equatable, Sendable {
     case exportResult(transcript: Transcript, summary: Summary?, format: ExportFormat)
     case loadConfigStatus
     case saveDataDirectory(String)
+    case saveTranscriptionMode(TranscriptionMode)
     case deleteAudio(Recording)
     case deleteTranscript(Transcript)
     case quit

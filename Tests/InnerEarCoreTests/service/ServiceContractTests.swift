@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@testable import InnerEarMetadata
 @testable import InnerEarRecording
 @testable import InnerEarTranscription
 
@@ -80,5 +81,43 @@ struct ServiceContractTests {
 
         #expect(resultURL == destination)
         #expect(service.lastExportedFormat == .markdown)
+    }
+
+    @Test
+    func calendarMetadataService_activeEvent_returnsStubbedEventForQueriedInterval() async throws {
+        let service = FakeCalendarMetadataService()
+        let expected = CalendarContext(
+            eventTitle: "Weekly Sync",
+            startDate: Date(timeIntervalSince1970: 1_000_000),
+            endDate: Date(timeIntervalSince1970: 1_001_800)
+        )
+        service.stubbedEvent = expected
+        let interval = DateInterval(start: Date(timeIntervalSince1970: 1_000_100), duration: 60)
+
+        let result = try await service.activeEvent(during: interval)
+
+        #expect(result == expected)
+        #expect(service.lastQueriedInterval == interval)
+    }
+
+    @Test
+    func calendarMetadataService_activeEvent_whenNoEventOverlaps_returnsNilNotError() async throws {
+        let service = FakeCalendarMetadataService()
+        let interval = DateInterval(start: Date(timeIntervalSince1970: 0), duration: 60)
+
+        let result = try await service.activeEvent(during: interval)
+
+        #expect(result == nil)
+    }
+
+    @Test
+    func windowMetadataService_captureForegroundWindow_returnsStubbedWindow() async throws {
+        let service = FakeWindowMetadataService()
+        let expected = WindowContext(applicationName: "zoom.us", windowTitle: "Weekly Sync", capturedAt: Date(timeIntervalSince1970: 0))
+        service.stubbedWindow = expected
+
+        let result = await service.captureForegroundWindow()
+
+        #expect(result == expected)
     }
 }

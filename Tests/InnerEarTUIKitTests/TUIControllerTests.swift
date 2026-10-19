@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import InnerEarTUIKit
+import InnerEarCore
 import InnerEarRecording
 import InnerEarTranscription
 
@@ -341,7 +342,7 @@ struct TUIControllerTests {
             settings: .editing(currentInput: "/tmp/newpath")
         )
         let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
-        if case .viewing(let resolvedPath, let source) = nextState.settings {
+        if case .viewing(let resolvedPath, let source, _) = nextState.settings {
             #expect(resolvedPath == "")
             #expect(source == .defaultLocation)
         } else {
@@ -355,7 +356,7 @@ struct TUIControllerTests {
         let state = TUIState(
             focusedPane: .navigation,
             selectedSection: 2,
-            settings: .viewing(resolvedPath: "/data", source: .configFile)
+            settings: .viewing(resolvedPath: "/data", source: .configFile, transcriptionMode: .manual)
         )
         let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
         #expect(nextState.settings == state.settings)
@@ -496,7 +497,7 @@ struct TUIControllerTests {
         let state = TUIState(
             focusedPane: .detail,
             selectedSection: 2,
-            settings: .viewing(resolvedPath: "/data", source: .configFile)
+            settings: .viewing(resolvedPath: "/data", source: .configFile, transcriptionMode: .manual)
         )
         let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
         #expect(nextState.focusedPane == .navigation)
@@ -1234,7 +1235,7 @@ struct TUIControllerTests {
         let state = TUIState(
             focusedPane: .detail,
             selectedSection: 2,
-            settings: .viewing(resolvedPath: "/data/inner", source: .configFile)
+            settings: .viewing(resolvedPath: "/data/inner", source: .configFile, transcriptionMode: .manual)
         )
         let (nextState, effects) = TUIController.reduce(state, .key("e"))
         if case .editing(let input) = nextState.settings {
@@ -1243,6 +1244,45 @@ struct TUIControllerTests {
             #expect(Bool(false), "Expected .editing")
         }
         #expect(effects.isEmpty)
+    }
+
+    @Test
+    func settings_viewing_m_cyclesManualToAutomatic_emitsSaveTranscriptionMode() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .viewing(resolvedPath: "/data/inner", source: .configFile, transcriptionMode: .manual)
+        )
+        let (nextState, effects) = TUIController.reduce(state, .key("m"))
+
+        #expect(effects == [.saveTranscriptionMode(.automatic)])
+        // Settings state is left as-is — the run loop persists then
+        // re-reads the real on-disk value, same pattern as .saveDataDirectory.
+        #expect(nextState.settings == state.settings)
+    }
+
+    @Test
+    func settings_viewing_m_cyclesAutomaticToDisabled_emitsSaveTranscriptionMode() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .viewing(resolvedPath: "/data/inner", source: .configFile, transcriptionMode: .automatic)
+        )
+        let (_, effects) = TUIController.reduce(state, .key("m"))
+
+        #expect(effects == [.saveTranscriptionMode(.disabled)])
+    }
+
+    @Test
+    func settings_viewing_m_cyclesDisabledToManual_emitsSaveTranscriptionMode() {
+        let state = TUIState(
+            focusedPane: .detail,
+            selectedSection: 2,
+            settings: .viewing(resolvedPath: "/data/inner", source: .configFile, transcriptionMode: .disabled)
+        )
+        let (_, effects) = TUIController.reduce(state, .key("m"))
+
+        #expect(effects == [.saveTranscriptionMode(.manual)])
     }
 
     @Test
@@ -1324,7 +1364,7 @@ struct TUIControllerTests {
             settings: .editing(currentInput: "/tmp/typed")
         )
         let (nextState, effects) = TUIController.reduce(state, .key("\u{1B}"))
-        if case .viewing(let resolvedPath, let source) = nextState.settings {
+        if case .viewing(let resolvedPath, let source, _) = nextState.settings {
             #expect(resolvedPath == "")
             #expect(source == .defaultLocation)
         } else {

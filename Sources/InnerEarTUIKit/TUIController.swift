@@ -1,4 +1,5 @@
 import Foundation
+import InnerEarCore
 import InnerEarRecording
 import InnerEarTranscription
 
@@ -207,7 +208,7 @@ public enum TUIController {
                 case .viewing:
                     s.focusedPane = .navigation
                 case .editing:
-                    s.settings = .viewing(resolvedPath: "", source: .defaultLocation)
+                    s.settings = .viewing(resolvedPath: "", source: .defaultLocation, transcriptionMode: .manual)
                     return (s, [.loadConfigStatus])
                 }
             default:
@@ -502,11 +503,21 @@ public enum TUIController {
     /// `reduce(_:_:)` for why this is the right effect).
     private static func reduceSettings(state: TUIState, key: Character) -> (TUIState, [TUIEffect]) {
         switch state.settings {
-        case .viewing(let resolvedPath, _):
+        case .viewing(let resolvedPath, _, let transcriptionMode):
             if key == "e" {
                 var s = state
                 s.settings = .editing(currentInput: resolvedPath)
                 return (s, [])
+            }
+            if key == "m" {
+                // Cycles disabled -> manual -> automatic -> disabled.
+                // `state.settings` is left as-is (not optimistically
+                // updated) — the run loop persists the new mode via
+                // `.saveTranscriptionMode` and then re-reads it back via
+                // `.loadConfigStatus`-equivalent logic, the same pattern
+                // `.saveDataDirectory` already uses, so the displayed value
+                // always reflects what's actually on disk.
+                return (state, [.saveTranscriptionMode(nextTranscriptionMode(after: transcriptionMode))])
             }
             return (state, [])
 
@@ -537,6 +548,18 @@ public enum TUIController {
                 return (s, [])
             }
             return (state, [])
+        }
+    }
+
+    /// Cycle order for the `m` key in Settings: disabled -> manual ->
+    /// automatic -> disabled. `disabled`/`manual` are adjacent since they're
+    /// the two "won't auto-transcribe" options a user is likely comparing;
+    /// `automatic` is the one genuinely different behavior.
+    private static func nextTranscriptionMode(after mode: TranscriptionMode) -> TranscriptionMode {
+        switch mode {
+        case .disabled: return .manual
+        case .manual: return .automatic
+        case .automatic: return .disabled
         }
     }
 }

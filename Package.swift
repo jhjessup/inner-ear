@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "InnerEarCore", targets: ["InnerEarCore"]),
         .library(name: "InnerEarRecording", targets: ["InnerEarRecording"]),
         .library(name: "InnerEarTranscription", targets: ["InnerEarTranscription"]),
+        .library(name: "InnerEarMetadata", targets: ["InnerEarMetadata"]),
         .library(name: "InnerEarTUIKit", targets: ["InnerEarTUIKit"])
     ],
     dependencies: [
@@ -50,6 +51,7 @@ let package = Package(
                 "InnerEarCore",
                 "InnerEarRecording",
                 "InnerEarTranscription",
+                "InnerEarMetadata",
                 "InnerEarTUIKit",
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
             ]
@@ -83,13 +85,20 @@ let package = Package(
                 .product(name: "SpeakerKit", package: "argmax-oss-swift"),
             ]
         ),
+        // Calendar/window-title context capture, linked to a recording by
+        // its `recordingID: UUID` only — depends on InnerEarRecording just
+        // for that id type, never on InnerEarTranscription.
+        .target(
+            name: "InnerEarMetadata",
+            dependencies: ["InnerEarCore", "InnerEarRecording"]
+        ),
         .target(
             name: "InnerEarTUIKit",
-            dependencies: ["InnerEarRecording", "InnerEarTranscription"]
+            dependencies: ["InnerEarCore", "InnerEarRecording", "InnerEarTranscription"]
         ),
         .testTarget(
             name: "InnerEarCoreTests",
-            dependencies: ["InnerEarCore", "InnerEarRecording", "InnerEarTranscription"]
+            dependencies: ["InnerEarCore", "InnerEarRecording", "InnerEarTranscription", "InnerEarMetadata"]
         ),
         .testTarget(
             name: "InnerEarTUIKitTests",

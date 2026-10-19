@@ -1,4 +1,5 @@
 import Foundation
+@testable import InnerEarMetadata
 @testable import InnerEarRecording
 @testable import InnerEarTranscription
 
@@ -38,6 +39,11 @@ final class FakeTranscriptionService: TranscriptionService, @unchecked Sendable 
     var stubbedTranscript: Transcript
     var transcribeError: Error?
     var transcribeCallCount = 0
+    /// Optional delay before `transcribe` returns — used by
+    /// `BackgroundTranscriptionCoordinatorTests` to prove a caller isn't
+    /// blocked waiting on the pipeline. `nil` (the default) returns
+    /// immediately, same as before this existed.
+    var artificialDelay: Duration?
 
     init(stubbedTranscript: Transcript) {
         self.stubbedTranscript = stubbedTranscript
@@ -50,6 +56,9 @@ final class FakeTranscriptionService: TranscriptionService, @unchecked Sendable 
         progressHandler: (@Sendable (Int) -> Void)?
     ) async throws -> Transcript {
         transcribeCallCount += 1
+        if let artificialDelay {
+            try? await Task.sleep(for: artificialDelay)
+        }
         if let transcribeError { throw transcribeError }
         return stubbedTranscript
     }
@@ -108,6 +117,26 @@ final class FakeExportService: ExportService, @unchecked Sendable {
         lastExportedFormat = format
         if let exportError { throw exportError }
         return destinationURL
+    }
+}
+
+final class FakeCalendarMetadataService: CalendarMetadataService, @unchecked Sendable {
+    var stubbedEvent: CalendarContext?
+    var activeEventError: Error?
+    var lastQueriedInterval: DateInterval?
+
+    func activeEvent(during interval: DateInterval) async throws -> CalendarContext? {
+        lastQueriedInterval = interval
+        if let activeEventError { throw activeEventError }
+        return stubbedEvent
+    }
+}
+
+final class FakeWindowMetadataService: WindowMetadataService, @unchecked Sendable {
+    var stubbedWindow: WindowContext?
+
+    func captureForegroundWindow() async -> WindowContext? {
+        stubbedWindow
     }
 }
 

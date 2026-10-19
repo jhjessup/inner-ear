@@ -1,4 +1,5 @@
 import Foundation
+import InnerEarCore
 import InnerEarRecording
 import InnerEarTranscription
 
@@ -512,14 +513,16 @@ public enum TUIRenderer {
     /// Section 2 (Settings) detail lines.
     private static func renderSettingsDetail(state: TUIState, width: Int) -> [String] {
         switch state.settings {
-        case .viewing(let resolvedPath, let source):
+        case .viewing(let resolvedPath, let source, let transcriptionMode):
             return [
                 "Data directory:",
                 "  \(resolvedPath)",
                 "",
                 "Source: \(sourceDescription(source))",
                 "",
-                "[e] Edit"
+                "Transcription: \(transcriptionModeDescription(transcriptionMode))",
+                "",
+                "[e] Edit data directory   [m] Cycle transcription mode"
             ]
         case .editing(let currentInput):
             return [
@@ -536,6 +539,15 @@ public enum TUIRenderer {
         case .envVar:        return "INNEREAR_DATA_DIR environment variable"
         case .configFile:    return "config.json"
         case .defaultLocation: return "default (Application Support)"
+        }
+    }
+
+    /// Human-readable description of a `TranscriptionMode`.
+    private static func transcriptionModeDescription(_ mode: TranscriptionMode) -> String {
+        switch mode {
+        case .disabled:  return "disabled — generate transcripts manually from Recordings"
+        case .manual:    return "manual — generate transcripts manually from Recordings"
+        case .automatic: return "automatic — transcribes in the background after each recording"
         }
     }
 
@@ -586,7 +598,7 @@ public enum TUIRenderer {
         case 2:
             switch state.settings {
             case .viewing:
-                return "[e] Edit  [Tab] Nav  [Esc] Back"
+                return "[e] Edit  [m] Transcription  [Tab] Nav  [Esc] Back"
             case .editing:
                 return "[Enter] Save  [Esc] Cancel  [Backspace] Delete"
             }
