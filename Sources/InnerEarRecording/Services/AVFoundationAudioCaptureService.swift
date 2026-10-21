@@ -183,14 +183,56 @@ public final actor AVFoundationAudioCaptureService: AudioCaptureService, Sendabl
         return recording
     }
 
+    // MARK: - Compressed File Writing
+
+    /// Bits per second, per channel — applies to both the mic (usually 1
+    /// channel) and system-audio (2 channels, so ~2x this total) tracks.
+    /// 64 kbps/channel is well above what speech needs to stay
+    /// intelligible; chosen generously rather than minimally since the
+    /// whole point is "shrink a lot for free," not "shrink as much as
+    /// physically possible."
+    private static let aacBitRatePerChannel = 64_000
+
+    /// Opens `url` for writing as AAC-compressed audio (inside the same
+    /// `.caf` container — CAF natively supports AAC payloads, so no
+    /// filename/extension change was needed) instead of the raw linear PCM
+    /// this used to write. Cuts recorded file size roughly 10-20x with no
+    /// expected loss to transcription/diarization accuracy: both
+    /// WhisperKit and SpeakerKit load audio via AVFoundation, which
+    /// decodes AAC exactly the same as PCM, and speech-grade AAC at this
+    /// bitrate preserves far more detail than either an ASR mel-spectrogram
+    /// or a speaker-embedding model actually uses.
+    ///
+    /// `commonFormat`/`interleaved` are copied from `format` (the tap's or
+    /// stream's actual native format) so the file's `processingFormat`
+    /// matches exactly what incoming buffers already are — only the
+    /// on-disk encoding changes, not a sample-rate conversion, keeping
+    /// this a pure "compress what we already have" change rather than
+    /// something that could also alter fidelity by resampling.
+    private static func makeCompressedAudioFile(at url: URL, matching format: AVAudioFormat) throws -> AVAudioFile {
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: format.sampleRate,
+            AVNumberOfChannelsKey: format.channelCount,
+            AVEncoderBitRatePerChannelKey: aacBitRatePerChannel
+        ]
+        return try AVAudioFile(
+            forWriting: url,
+            settings: settings,
+            commonFormat: format.commonFormat,
+            interleaved: format.isInterleaved
+        )
+    }
+
     // MARK: - Microphone Capture (AVAudioEngine)
 
     private func setupMicrophoneCapture(to url: URL) throws {
         let inputNode = audioEngine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
 
-        // Create AVAudioFile for writing (CAF format, matching input format)
-        micAudioFile = try AVAudioFile(forWriting: url, settings: inputFormat.settings)
+        // AAC-compressed, not raw PCM — see `makeCompressedAudioFile`'s doc
+        // comment for why this doesn't cost WhisperKit/SpeakerKit anything.
+        micAudioFile = try Self.makeCompressedAudioFile(at: url, matching: inputFormat)
 
         // Install tap on input node
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
@@ -285,7 +327,7 @@ public final actor AVFoundationAudioCaptureService: AudioCaptureService, Sendabl
                   let format = AVAudioFormat(streamDescription: asbd) else {
                 return
             }
-            systemAudioFile = try? AVAudioFile(forWriting: url, settings: format.settings)
+            systemAudioFile = try? Self.makeCompressedAudioFile(at: url, matching: format)
         }
         guard let systemAudioFile else { return }
 
