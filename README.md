@@ -33,15 +33,19 @@ All of it works entirely offline once the on-device models are downloaded on fir
 ```bash
 git clone https://github.com/jhjessup/inner-ear.git
 cd inner-ear
-swift build
-swift run innerear tui
+scripts/install.sh      # builds a release binary, installs it as `innerear` on PATH
+innerear
 ```
+
+`scripts/install.sh` installs to `/usr/local/bin` by default (asking for `sudo` only if that's not writable); pass a different location with `INSTALL_DIR=~/.local/bin scripts/install.sh`. Re-run it any time after pulling updates you want to pick up. Bare `innerear` launches the TUI (the primary interface) directly — no subcommand needed.
+
+Prefer not to install anything? `swift run innerear tui` works the same way without touching your PATH, just slower to start (SwiftPM re-checks the build graph on every invocation).
 
 First launch will prompt for microphone (and, if you capture system audio, Screen Recording) permission, and downloads the WhisperKit/SpeakerKit Core ML models on first use — expect a pause and a real download the very first time you record or transcribe something.
 
 ### CLI subcommands
 
-`innerear tui` is the primary interface. A handful of lower-level, non-interactive subcommands also exist for scripting:
+Bare `innerear` (or `innerear tui`) is the primary interface. A handful of lower-level, non-interactive subcommands also exist for scripting:
 
 ```bash
 innerear record --duration 30                        # record for a fixed duration (mic + system audio by default)
