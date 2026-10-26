@@ -84,10 +84,13 @@ public final actor AVFoundationAudioCaptureService: AudioCaptureService, Sendabl
         try FileManager.default.createDirectory(at: recordingDir, withIntermediateDirectories: true)
         currentRecordingDirectory = recordingDir
 
-        // Set up microphone capture
-        let micURL = recordingDir.appendingPathComponent("mic.caf")
-        micFileURL = micURL
-        try setupMicrophoneCapture(to: micURL)
+        // Set up microphone capture. `micFileURL` must be set before this
+        // call — setupMicrophoneCapture installs the tap but no longer
+        // opens the file itself (see its doc comment); writeMicBuffer
+        // opens it lazily from `micFileURL` once the first real buffer
+        // arrives.
+        micFileURL = recordingDir.appendingPathComponent("mic.caf")
+        try setupMicrophoneCapture()
 
         // Set up system audio capture if requested
         if captureSystemAudio {
@@ -226,16 +229,25 @@ public final actor AVFoundationAudioCaptureService: AudioCaptureService, Sendabl
 
     // MARK: - Microphone Capture (AVAudioEngine)
 
-    private func setupMicrophoneCapture(to url: URL) throws {
+    private func setupMicrophoneCapture() throws {
         let inputNode = audioEngine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
 
-        // AAC-compressed, not raw PCM — see `makeCompressedAudioFile`'s doc
-        // comment for why this doesn't cost WhisperKit/SpeakerKit anything.
-        micAudioFile = try Self.makeCompressedAudioFile(at: url, matching: inputFormat)
-
-        // Install tap on input node
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+        // `format: nil`, not the just-queried `inputNode.outputFormat(forBus:
+        // 0)` — passing an explicit format here requires it to EXACTLY match
+        // whatever CoreAudio actually negotiates at the moment the tap is
+        // installed, which can differ from what was queried a moment
+        // earlier. Observed crashing in practice with Bluetooth input
+        // devices (AirPods etc.): the mic renegotiates into a low-rate HFP
+        // "phone call" mode (e.g. 1 ch, 16000 Hz) independently of this
+        // query, and AVAudioEngine throws an uncaught Obj-C exception
+        // ("Failed to create tap due to format mismatch") rather than a
+        // catchable Swift error, crashing the whole process. `nil` tells
+        // AVAudioEngine to use the bus's real format, whatever that turns
+        // out to be, eliminating the race entirely. `micAudioFile` is then
+        // opened lazily from the first delivered buffer's OWN format in
+        // `writeMicBuffer`, mirroring `writeSystemAudioBuffer`'s identical
+        // rationale for the exact same class of problem.
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nil) { [weak self] buffer, _ in
             // AVAudioPCMBuffer isn't Sendable-audited in this SDK, so Swift 6
             // strict concurrency flags handing it into a new Task directly.
             // It's an immutable snapshot by the time the tap delivers it, so
@@ -248,7 +260,17 @@ public final actor AVFoundationAudioCaptureService: AudioCaptureService, Sendabl
     }
 
     private func writeMicBuffer(_ buffer: AVAudioPCMBuffer) async {
-        guard let micAudioFile = micAudioFile else { return }
+        guard let micFileURL else { return }
+
+        // Lazily open the file using the format of the first buffer
+        // actually delivered — see `setupMicrophoneCapture`'s doc comment
+        // on why this is derived from the real buffer rather than a
+        // format queried in advance.
+        if micAudioFile == nil {
+            micAudioFile = try? Self.makeCompressedAudioFile(at: micFileURL, matching: buffer.format)
+        }
+        guard let micAudioFile else { return }
+
         do {
             try micAudioFile.write(from: buffer)
         } catch {
